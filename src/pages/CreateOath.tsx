@@ -28,6 +28,18 @@ import {
   RemoveCircleOutline as RemoveCircleOutlineIcon
 } from '@mui/icons-material';
 
+interface OathFormData {
+  title: string;
+  description: string;
+  type: 'personal' | 'group' | 'challenge';
+  deadline: string;
+  terms: string[];
+  verificationMethod: string;
+  stakeAmount: number;
+  penaltyMethod: 'donate' | 'burn' | 'distribute';
+  rewardDescription: string;
+}
+
 const CreateOath: React.FC = () => {
   const [activeStep, setActiveStep] = React.useState(0);
   const steps = ['基本信息', '誓约条款', '奖惩设置', '确认提交'];
@@ -38,6 +50,53 @@ const CreateOath: React.FC = () => {
 
   const handleBack = () => {
     setActiveStep((prevActiveStep) => prevActiveStep - 1);
+  };
+
+  // 创建Oath表单数据
+  const [formData, setFormData] = React.useState<OathFormData>({
+    title: '',
+    description: '',
+    type: 'personal',
+    deadline: '',
+    terms: ['', ''],
+    verificationMethod: '',
+    stakeAmount: 0,
+    penaltyMethod: 'donate',
+    rewardDescription: ''
+  });
+  
+  // 处理表单字段变化
+  const handleInputChange = (field: keyof OathFormData, value: string | number | string[]) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+  
+  // 处理条款变化
+  const handleTermChange = (index: number, value: string) => {
+    const newTerms = [...formData.terms];
+    newTerms[index] = value;
+    handleInputChange('terms', newTerms);
+  };
+  
+  // 添加新条款
+  const addTerm = () => {
+    handleInputChange('terms', [...formData.terms, '']);
+  };
+  
+  // 删除条款
+  const removeTerm = (index: number) => {
+    const newTerms = formData.terms.filter((_, i) => i !== index);
+    handleInputChange('terms', newTerms);
+  };
+  
+  // 提交表单
+  const handleSubmit = () => {
+    console.log('提交的誓约数据:', formData);
+    // 这里可以添加数据验证和提交到区块链的逻辑
+    alert('誓约已成功创建！');
+    // 提交后可以跳转到首页或誓约详情页
   };
 
   return (
@@ -111,6 +170,8 @@ const CreateOath: React.FC = () => {
                 variant="outlined"
                 margin="normal"
                 required
+                value={formData.title}
+                onChange={(e) => handleInputChange('title', e.target.value)}
               />
               
               <TextField
@@ -122,13 +183,19 @@ const CreateOath: React.FC = () => {
                 multiline
                 rows={4}
                 required
+                value={formData.description}
+                onChange={(e) => handleInputChange('description', e.target.value)}
               />
               
               <FormControl component="fieldset" sx={{ mt: 3, mb: 2 }}>
                 <Typography variant="subtitle1" sx={{ mb: 1 }}>
                   誓约类型
                 </Typography>
-                <RadioGroup row defaultValue="personal">
+                <RadioGroup 
+                  row 
+                  value={formData.type}
+                  onChange={(e) => handleInputChange('type', e.target.value as 'personal' | 'group' | 'challenge')}
+                >
                   <FormControlLabel value="personal" control={<Radio />} label="个人誓约" />
                   <FormControlLabel value="group" control={<Radio />} label="团队誓约" />
                   <FormControlLabel value="challenge" control={<Radio />} label="挑战誓约" />
@@ -143,6 +210,8 @@ const CreateOath: React.FC = () => {
                 margin="normal"
                 InputLabelProps={{ shrink: true }}
                 required
+                value={formData.deadline}
+                onChange={(e) => handleInputChange('deadline', e.target.value)}
               />
             </Box>
           )}
@@ -162,25 +231,30 @@ const CreateOath: React.FC = () => {
                     startIcon={<AddCircleOutlineIcon />} 
                     sx={{ ml: 2 }}
                     size="small"
+                    onClick={addTerm}
                   >
                     添加条款
                   </Button>
                 </Box>
                 
-                {[1, 2].map((item) => (
-                  <Paper key={item} variant="outlined" sx={{ p: 2, mb: 2, position: 'relative' }}>
+                {formData.terms.map((term, index) => (
+                  <Paper key={index} variant="outlined" sx={{ p: 2, mb: 2, position: 'relative' }}>
                     <TextField
                       fullWidth
-                      label={`条款 ${item}`}
+                      label={`条款 ${index + 1}`}
                       placeholder="描述具体的誓约条款内容"
                       variant="outlined"
                       margin="normal"
                       multiline
                       rows={2}
+                      value={term}
+                      onChange={(e) => handleTermChange(index, e.target.value)}
                     />
                     <IconButton 
                       size="small" 
                       sx={{ position: 'absolute', top: 8, right: 8, color: 'error.main' }}
+                      onClick={() => removeTerm(index)}
+                      disabled={formData.terms.length <= 1}
                     >
                       <RemoveCircleOutlineIcon />
                     </IconButton>
@@ -196,6 +270,8 @@ const CreateOath: React.FC = () => {
                 margin="normal"
                 multiline
                 rows={3}
+                value={formData.verificationMethod}
+                onChange={(e) => handleInputChange('verificationMethod', e.target.value)}
               />
             </Box>
           )}
@@ -216,13 +292,19 @@ const CreateOath: React.FC = () => {
                 InputProps={{
                   startAdornment: <InputAdornment position="start">ETH</InputAdornment>,
                 }}
+                value={formData.stakeAmount}
+                onChange={(e) => handleInputChange('stakeAmount', parseFloat(e.target.value) || 0)}
               />
               
               <FormControl component="fieldset" sx={{ mt: 3, mb: 2 }}>
                 <Typography variant="subtitle1" sx={{ mb: 1 }}>
                   违约处理方式
                 </Typography>
-                <RadioGroup row defaultValue="donate">
+                <RadioGroup 
+                  row 
+                  value={formData.penaltyMethod}
+                  onChange={(e) => handleInputChange('penaltyMethod', e.target.value as 'donate' | 'burn' | 'distribute')}
+                >
                   <FormControlLabel value="donate" control={<Radio />} label="捐赠慈善" />
                   <FormControlLabel value="burn" control={<Radio />} label="销毁" />
                   <FormControlLabel value="distribute" control={<Radio />} label="分配给其他参与者" />
@@ -237,6 +319,8 @@ const CreateOath: React.FC = () => {
                 margin="normal"
                 multiline
                 rows={3}
+                value={formData.rewardDescription}
+                onChange={(e) => handleInputChange('rewardDescription', e.target.value)}
               />
             </Box>
           )}
@@ -258,7 +342,7 @@ const CreateOath: React.FC = () => {
                       标题
                     </Typography>
                     <Typography variant="body1">
-                      每天跑步5公里
+                      {formData.title}
                     </Typography>
                   </Box>
                   
@@ -267,7 +351,7 @@ const CreateOath: React.FC = () => {
                       类型
                     </Typography>
                     <Typography variant="body1">
-                      个人誓约
+                      {formData.type === 'personal' ? '个人誓约' : formData.type === 'group' ? '团队誓约' : '挑战誓约'}
                     </Typography>
                   </Box>
                   
@@ -276,7 +360,7 @@ const CreateOath: React.FC = () => {
                       截止日期
                     </Typography>
                     <Typography variant="body1">
-                      2023-12-31
+                      {formData.deadline}
                     </Typography>
                   </Box>
                   
@@ -285,7 +369,7 @@ const CreateOath: React.FC = () => {
                       质押金额
                     </Typography>
                     <Typography variant="body1">
-                      0.1 ETH
+                      {formData.stakeAmount} ETH
                     </Typography>
                   </Box>
                 </Stack>
@@ -306,7 +390,7 @@ const CreateOath: React.FC = () => {
             </Button>
             <Button
               variant="contained"
-              onClick={activeStep === steps.length - 1 ? undefined : handleNext}
+              onClick={activeStep === steps.length - 1 ? handleSubmit : handleNext}
               endIcon={activeStep === steps.length - 1 ? <SaveIcon /> : undefined}
             >
               {activeStep === steps.length - 1 ? '提交誓约' : '下一步'}
