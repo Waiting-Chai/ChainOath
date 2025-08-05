@@ -22,3 +22,12 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+# Foundry (Solidity)
+out/
+cache/
+lib/
+.env
+.env.*
+.forge-snapshots/
+*.sol.js
+*.sol.d.ts
