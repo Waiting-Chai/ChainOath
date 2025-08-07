@@ -1,7 +1,8 @@
 import React from "react";
-import { Link as RouterLink } from "react-router-dom";
+import { Link as RouterLink, useNavigate } from "react-router-dom";
 import * as ethers from "ethers";
 import {
+  Alert,
   AppBar,
   Box,
   Button,
@@ -15,6 +16,7 @@ import {
   Stack,
   Toolbar,
   Typography,
+  Snackbar,
 } from "@mui/material";
 import {
   Add as AddIcon,
@@ -31,10 +33,28 @@ import {
 
 const Home: React.FC = () => {
   const currentYear = new Date().getFullYear();
+  const navigator = useNavigate();
 
+  const [openConnectWalletWarn, setOpenConnectWalletWarn] = React.useState(false);
+  const handleConnectWalletSnackbarClose = (_event?: React.SyntheticEvent | Event, reason?: string) => {
+    if (reason === 'clickaway') {
+      return;
+    }
+    setOpenConnectWalletWarn(false);
+    setWarningMessage('');
+  };
+
+  const [warningMessage, setWarningMessage] = React.useState('');
+  const pleaseConnectWallet = '请连接数字钱包';
+  const withoutMateMask = "没有检测到 MeteMask";
+
+  //   点击链接钱包按钮出发
   const connectWallet = async () => {
     // 检测 MetaMask 注入
-    if (!window.ethereum) throw new Error("请先安装 MetaMask");
+    if (!window.ethereum) {
+      setWarningMessage(withoutMateMask);
+       throw new Error("请先安装 MetaMask");
+    }
     // v6 里叫 BrowserProvider
     const provider = new ethers.BrowserProvider(window.ethereum);
     // 请求账户授权
@@ -42,8 +62,37 @@ const Home: React.FC = () => {
     const signer = await provider.getSigner();
     const addr = await signer.getAddress();
     console.log("当前地址：", addr);
+    sessionStorage.setItem("currentUserAddr", addr);
+  };
 
-    sessionStorage.setItem("currentUserAddress", addr);
+  //  检查当前授权状态
+  const checkWalletAuthorized = async () : Promise<boolean> => {
+    if (!window.ethereum) return false;
+    const provider = new ethers.BrowserProvider(window.ethereum);
+    // v6 里 listAccounts 会返回已授权的地址列表
+    const accounts = await provider.listAccounts();
+    return accounts.length > 0;
+  };
+
+  //  点击誓约， 跳转到对应的页面， 但是如果没有连接钱包的话弹窗处理
+  const handleClickCreate = async () : Promise<void> => {
+    const ok = await checkWalletAuthorized();
+    if (!ok) {
+      setWarningMessage(pleaseConnectWallet);
+      setOpenConnectWalletWarn(true);
+      connectWallet().then(() => {
+        navigator("/create")
+      });
+    } else {
+      //   用户已经授权，可以直接用 signer 去做后续操作
+      const provider = new ethers.BrowserProvider(window.ethereum!);
+      const signer = await provider.getSigner();
+      //   …比如调用合约、签名消息
+      const addr = await signer.getAddress()
+      console.log("继续执行业务逻辑，当前地址：", addr);
+      navigator("/create");
+      sessionStorage.setItem("currentUserAddr", addr);
+    }
   };
 
   return (
@@ -55,6 +104,17 @@ const Home: React.FC = () => {
         flexDirection: "column",
       }}
     >
+      <Snackbar open={openConnectWalletWarn} autoHideDuration={6000} onClose={handleConnectWalletSnackbarClose}   anchorOrigin={{ vertical: "top", horizontal: "center" }}
+      >
+        <Alert
+          onClose={handleConnectWalletSnackbarClose}
+          severity="warning"
+          variant="filled"
+          sx={{ width: '100%' }}
+        >
+          {warningMessage}
+        </Alert>
+      </Snackbar>
       {/* Header */}
       <AppBar
         position="fixed"
@@ -182,8 +242,6 @@ const Home: React.FC = () => {
                       color="primary"
                       size="large"
                       startIcon={<AddIcon />}
-                      component={RouterLink}
-                      to="/create"
                       sx={{
                         borderRadius: 2,
                         textTransform: "none",
@@ -191,6 +249,7 @@ const Home: React.FC = () => {
                         boxShadow: 4,
                         "&:hover": { boxShadow: 8 },
                       }}
+                      onClick={handleClickCreate}
                     >
                       创建誓约
                     </Button>
