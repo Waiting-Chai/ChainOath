@@ -1,5 +1,5 @@
-import React from 'react';
-import { Link as RouterLink } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import {
   AppBar,
   Box,
@@ -52,6 +52,16 @@ interface OathFormData {
 }
 
 const CreateOath: React.FC = () => {
+  const navigator = useNavigate();
+
+  useEffect(() => {
+    //   从sessionStorage中获取currentUserAddr, 如果获取为空， 校验失败， 跳转到error页面
+    const currentUserAddr = sessionStorage.getItem('currentUserAddr');
+    if (!currentUserAddr) {
+      navigator('/error');
+    }
+  }, [navigator]); 
+
   const [activeStep, setActiveStep] = React.useState(0);
   const steps = ['基本信息', '参与者设置', '监督配置', '确认提交'];
 
@@ -76,7 +86,7 @@ const CreateOath: React.FC = () => {
     return now.toISOString().slice(0, 16);
   };
 
-  const [formData, setFormData] = React.useState<OathFormData>({
+  const [formData, setFormData] = React.useState<OathFormData>(() => ({
     title: '',
     description: '',
     committer: '',
@@ -95,15 +105,15 @@ const CreateOath: React.FC = () => {
     startTime: getCurrentDateTime(),
     endTime: getDateTimeAfter30Days(),
     tokenAddress: ''
-  });
+  }));
   
   // 处理表单字段变化
-  const handleInputChange = (field: keyof OathFormData, value: string | number | string[]) => {
+  const handleInputChange = React.useCallback((field: keyof OathFormData, value: string | number | string[]) => {
     setFormData(prev => ({
       ...prev,
       [field]: value
     }));
-  };
+  }, []);
   
   // 时间单位转换为秒
   const convertToSeconds = (value: number, unit: string): number => {
@@ -118,40 +128,40 @@ const CreateOath: React.FC = () => {
   };
   
   // 帮助提示组件
-  const HelpTooltip = ({ title, children }: { title: string; children: React.ReactNode }) => (
+  const HelpTooltip = React.useCallback(({ title, children }: { title: string; children: React.ReactNode }) => (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
       {children}
       <Tooltip title={title} placement="top">
         <HelpOutlineIcon sx={{ fontSize: 16, color: 'text.secondary', cursor: 'help' }} />
       </Tooltip>
     </Box>
-  );
+  ), []);
   
   // 处理监督者变化
-  const handleSupervisorChange = (index: number, value: string) => {
+  const handleSupervisorChange = React.useCallback((index: number, value: string) => {
     const newSupervisors = [...formData.supervisors];
     newSupervisors[index] = value;
     handleInputChange('supervisors', newSupervisors);
-  };
+  }, [formData.supervisors, handleInputChange]);
   
   // 添加新监督者
-  const addSupervisor = () => {
+  const addSupervisor = React.useCallback(() => {
     if (formData.supervisors.length < 10) { // 限制最多10个监督者
       handleInputChange('supervisors', [...formData.supervisors, '']);
     } else {
       alert('最多只能添加10个监督者');
     }
-  };
+  }, [formData.supervisors, handleInputChange]);
   
   // 删除监督者
-  const removeSupervisor = (index: number) => {
+  const removeSupervisor = React.useCallback((index: number) => {
     if (formData.supervisors.length > 1) { // 至少保留一个监督者
       const newSupervisors = formData.supervisors.filter((_, i) => i !== index);
       handleInputChange('supervisors', newSupervisors);
     } else {
       alert('至少需要一个监督者');
     }
-  };
+  }, [formData.supervisors, handleInputChange]);
   
   // 提交表单
   const handleSubmit = () => {
@@ -306,18 +316,25 @@ const CreateOath: React.FC = () => {
                 />
               </HelpTooltip>
               
-              <HelpTooltip title="详细描述誓约的具体内容、目标和要求，这将帮助监督者更好地评估您的履约情况">
+              <HelpTooltip title="详细描述誓约的具体内容、目标和要求，这将帮助监督者更好地评估您的履约情况（限制500字以内）">
                 <TextField
                   fullWidth
                   label="誓约描述"
-                  placeholder="详细描述您的誓约内容和目标"
+                  placeholder="详细描述您的誓约内容和目标（限制500字以内）"
                   variant="outlined"
                   margin="normal"
                   multiline
                   rows={4}
                   required
                   value={formData.description}
-                  onChange={(e) => handleInputChange('description', e.target.value)}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (value.length <= 500) {
+                      handleInputChange('description', value);
+                    }
+                  }}
+                  helperText={`${formData.description.length}/500 字符`}
+                  error={formData.description.length > 500}
                 />
               </HelpTooltip>
               
