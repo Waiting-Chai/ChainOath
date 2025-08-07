@@ -2,11 +2,12 @@
 pragma solidity ^0.8.21;
 
 import "./Ownerable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /// @title ChainOath - 去中心化誓约/承诺记录器
 /// @notice 这是一个用于编译测试的最小脚手架版本合约
 
-contract ChainOath is Ownerable {
+contract ChainOath is Ownerable, ReentrancyGuard {
 
     /// @notice 监督者检查结果结构体
     struct CheckResult {
@@ -39,7 +40,7 @@ contract ChainOath is Ownerable {
     bool public allCommittersStaked;
 
     //  每个角色质押的资产
-    mapping(address => uint16) public roleStakes; 
+    mapping(address => uint256) public roleStakes; 
 
     //  角色映射
     mapping(address => bool) public isSupervisor;
@@ -78,9 +79,9 @@ contract ChainOath is Ownerable {
         address[] committers;             // 守约人列表
         address[] supervisors;            // 监督者列表
         address rewardToken;              // 奖励代币地址
-        uint16 totalReward;               // Creator 总质押奖励金额
-        uint16 committerStake;            // 每位守约人需质押金额
-        uint16 supervisorStake;           // 每位监督者需质押金额
+        uint256 totalReward;              // Creator 总质押奖励金额
+        uint256 committerStake;           // 每位守约人需质押金额
+        uint256 supervisorStake;          // 每位监督者需质押金额
         uint8 supervisorRewardRatio;      // 监督者奖励比例（如 10 表示 10%）
         uint8 committerRewardRatio;       // 守约人奖励比例（如 90 表示 90%）
         uint32 checkInterval;             // check 间隔（单位：秒）
@@ -112,7 +113,7 @@ contract ChainOath is Ownerable {
         require(msg.value == _oath.totalReward, "The creator must pledge the exact amount");
 
         //   创建者质押奖励
-        roleStakes[msg.sender] = uint16(_oath.totalReward);
+        roleStakes[msg.sender] = _oath.totalReward;
 
         creator = msg.sender;
         createTime = uint32(block.timestamp);
@@ -200,7 +201,7 @@ contract ChainOath is Ownerable {
     }
 
     /// @notice 合约创建者在合约状态结束后提取所有剩余价值
-    function createrWithdrawRmaining() external onlyOwner() {
+    function createrWithdrawRmaining() external onlyOwner() nonReentrant {
         require(
             status == OathStatus.Fulfilled || status == OathStatus.Broken 
                 || status == OathStatus.Pending || status == OathStatus.Aborted,
@@ -242,17 +243,20 @@ contract ChainOath is Ownerable {
                 withdrawAmount += remainingRewards;
             }
             
-            if (withdrawAmount > 0) {
-                roleStakes[msg.sender] = 0;
-                (bool success, ) = payable(msg.sender).call{value: withdrawAmount}("");
-                require(success, "Creator withdrawal failed");
-            }
+            require(withdrawAmount > 0, "Nothing to withdraw");
+            
+            // Effects: 先修改状态
+            roleStakes[msg.sender] = 0;
+            
+            // Interactions: 最后进行外部调用
+            (bool success, ) = payable(msg.sender).call{value: withdrawAmount}("");
+            require(success, "Creator withdrawal failed");
         }
 
     }
 
     /// @notice 监督者在合约状态结束后提取剩余奖励
-    function supervisorWithdrawRmaining() external onlySupervisor() {
+    function supervisorWithdrawRmaining() external onlySupervisor() nonReentrant {
         require(
             status == OathStatus.Fulfilled || status == OathStatus.Broken 
                 || status == OathStatus.Pending || status == OathStatus.Aborted,
@@ -286,17 +290,20 @@ contract ChainOath is Ownerable {
                  withdrawAmount += supervisorReward;
              }
             
-            if (withdrawAmount > 0) {
-                roleStakes[msg.sender] = 0;
-                (bool success, ) = payable(msg.sender).call{value: withdrawAmount}("");
-                require(success, "Supervisor withdrawal failed");
-            }
+            require(withdrawAmount > 0, "Nothing to withdraw");
+            
+            // Effects: 先修改状态
+            roleStakes[msg.sender] = 0;
+            
+            // Interactions: 最后进行外部调用
+            (bool success, ) = payable(msg.sender).call{value: withdrawAmount}("");
+            require(success, "Supervisor withdrawal failed");
         }
 
     }
 
     /// @notice 守约者在合约状态结束后提取剩余奖励
-    function committerWithdrawRemining() external onlyCommitter() {
+    function committerWithdrawRemining() external onlyCommitter() nonReentrant {
         require(
             status == OathStatus.Fulfilled || status == OathStatus.Broken 
                 || status == OathStatus.Pending || status == OathStatus.Aborted,
@@ -324,11 +331,14 @@ contract ChainOath is Ownerable {
                 withdrawAmount += committerReward;
             }
             
-            if (withdrawAmount > 0) {
-                roleStakes[msg.sender] = 0;
-                (bool success, ) = payable(msg.sender).call{value: withdrawAmount}("");
-                require(success, "Committer withdrawal failed");
-            }
+            require(withdrawAmount > 0, "Nothing to withdraw");
+            
+            // Effects: 先修改状态
+            roleStakes[msg.sender] = 0;
+            
+            // Interactions: 最后进行外部调用
+            (bool success, ) = payable(msg.sender).call{value: withdrawAmount}("");
+            require(success, "Committer withdrawal failed");
         }
 
     }
@@ -526,7 +536,9 @@ contract ChainOath is Ownerable {
                          supervisorReward = totalSupervisorReward / qualifiedSupervisorCount;
                      }
                      uint256 totalReturn = oath.supervisorStake + supervisorReward;
+                     // Effects: 先修改状态
                      roleStakes[supervisor] = 0; // 清零质押记录
+                     // Interactions: 最后进行外部调用
                      if (totalReturn > 0) {
                          (bool success, ) = payable(supervisor).call{value: totalReturn}("");
                          require(success, "Supervisor return failed");
@@ -542,7 +554,9 @@ contract ChainOath is Ownerable {
                 address committer = oath.committers[i];
                 if (committerFailures[committer] <= oath.maxCommitterFailures) {
                     uint256 totalReturn = oath.committerStake + committerReward;
+                    // Effects: 先修改状态
                     roleStakes[committer] = 0; // 清零质押记录
+                    // Interactions: 最后进行外部调用
                     if (totalReturn > 0) {
                         (bool success, ) = payable(committer).call{value: totalReturn}("");
                         require(success, "Committer return failed");
@@ -570,7 +584,9 @@ contract ChainOath is Ownerable {
                     address supervisor = oath.supervisors[i];
                     if (supervisorMisses[supervisor] <= oath.maxSupervisorMisses) {
                         uint256 totalReward = oath.supervisorStake + rewardPerSupervisor;
+                        // Effects: 先修改状态
                         roleStakes[supervisor] = 0; // 清零质押记录
+                        // Interactions: 最后进行外部调用
                         if (totalReward > 0) {
                             (bool success, ) = payable(supervisor).call{value: totalReward}("");
                             require(success, "Supervisor reward transfer failed");
@@ -608,15 +624,17 @@ contract ChainOath is Ownerable {
         require( block.timestamp > oath.startTime, "The oath has not been invalidated yet" );
         require(status == OathStatus.Pending, "Oath not in pending state");
 
-        uint16 withdrawNums = roleStakes[msg.sender];
+        uint256 withdrawNums = roleStakes[msg.sender];
          require(withdrawNums > 0, "No stake to withdraw");
+         
+         // Effects: 先修改状态
          roleStakes[msg.sender] = 0;
+         status = OathStatus.Cancelled;
+         emit OathStatusChanged(OathStatus.Pending, OathStatus.Cancelled);
+         
+         // Interactions: 最后进行外部调用
          (bool success, ) = payable(msg.sender).call{value: withdrawNums}("");
          require(success, "Withdrawal failed");
-         
-        // 设置状态为取消
-        status = OathStatus.Cancelled;
-        emit OathStatusChanged(OathStatus.Pending, OathStatus.Cancelled); 
     }
 
     function get021Supervisors() internal view returns (uint256) {

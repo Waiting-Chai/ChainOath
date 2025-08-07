@@ -9,9 +9,9 @@ contract ChainOathTest is Test {
     address public creater = address(0x1);
     address[] public supervisors = [address(0x2), address(0x3)];
     address[] public committers = [address(0x4), address(0x5)];
-    uint16 public totalReward = 100;
-    uint16 public committerStake = 2;
-    uint16 public supervisorStake = 1;
+    uint256 public totalReward = 100;
+    uint256 public committerStake = 2;
+    uint256 public supervisorStake = 1;
     uint8 public supervisorRewardRatio = 10;
     uint8 public committerRewardRatio = 90;
     uint32 public checkInterval = 7 days;
