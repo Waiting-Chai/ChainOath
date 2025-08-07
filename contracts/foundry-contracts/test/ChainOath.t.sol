@@ -52,14 +52,13 @@ contract ChainOathTest is Test {
             endTime: endTime,
             checkRoundsCount: 0
         });
-        chainOath = new ChainOath(oath_);
-        payable(address(chainOath)).transfer(totalReward);
+        chainOath = new ChainOath{value: totalReward}(oath_);
         vm.stopPrank();
     }
 
-    function test_InitialState() public {
-        (ChainOath.Oath memory oath, ChainOath.OathStatus status, uint32 round) = chainOath.getOathDetails();
-        assertEq(chainOath.creater(), creater, "creater address mismatch");
+    function test_InitialState() public view {
+        (ChainOath.Oath memory oath, ChainOath.OathStatus status,) = chainOath.getOathDetails();
+        assertEq(chainOath.creator(), creater, "creator address mismatch");
         assertEq(uint(status), uint(ChainOath.OathStatus.Pending), "status mismatch");
         assertEq(oath.supervisors.length, supervisors.length, "supervisors length mismatch");
         assertEq(oath.committers.length, committers.length, "committers length mismatch");
@@ -97,12 +96,20 @@ contract ChainOathTest is Test {
         // Setup: supervisors sign, committers stake, time moves to start
         _fullSetupAndStart();
 
-        // Round 1: all supervisors vote success
+        // Round 1: all supervisors vote success for all committers
+        ChainOath.CheckResult[] memory results = new ChainOath.CheckResult[](committers.length);
+        for (uint i = 0; i < committers.length; i++) {
+            results[i] = ChainOath.CheckResult({
+                committer: committers[i],
+                result: true
+            });
+        }
+        
         vm.startPrank(supervisors[0]);
-        chainOath.supervisorCheck(true);
+        chainOath.supervisorCheck(results);
         vm.stopPrank();
         vm.startPrank(supervisors[1]);
-        chainOath.supervisorCheck(true);
+        chainOath.supervisorCheck(results);
         vm.stopPrank();
 
         assertEq(chainOath.currentCheckRound(), 2, "currentCheckRound should be 2");
@@ -113,8 +120,16 @@ contract ChainOathTest is Test {
         _fullSetupAndStart();
 
         // Round 1: enough supervisors vote failure to break the oath
+        ChainOath.CheckResult[] memory results = new ChainOath.CheckResult[](committers.length);
+        for (uint i = 0; i < committers.length; i++) {
+            results[i] = ChainOath.CheckResult({
+                committer: committers[i],
+                result: false
+            });
+        }
+        
         vm.startPrank(supervisors[0]);
-        chainOath.supervisorCheck(false);
+        chainOath.supervisorCheck(results);
         vm.stopPrank();
 
         assertEq(uint(chainOath.status()), uint(ChainOath.OathStatus.Broken), "status should be Broken");
@@ -144,8 +159,16 @@ contract ChainOathTest is Test {
         _fullSetupAndStart();
 
         // Round 1: only one supervisor votes
+        ChainOath.CheckResult[] memory results = new ChainOath.CheckResult[](committers.length);
+        for (uint i = 0; i < committers.length; i++) {
+            results[i] = ChainOath.CheckResult({
+                committer: committers[i],
+                result: true
+            });
+        }
+        
         vm.startPrank(supervisors[0]);
-        chainOath.supervisorCheck(true);
+        chainOath.supervisorCheck(results);
         vm.stopPrank();
 
         // Move time past the check window
@@ -154,8 +177,8 @@ contract ChainOathTest is Test {
         // Finalize the round
         chainOath.finalizeCheckRound();
 
-        (uint16 s1f, uint16 s1m) = chainOath.getParticipantStatus(supervisors[0]);
-        (uint16 s2f, uint16 s2m) = chainOath.getParticipantStatus(supervisors[1]);
+        (, uint16 s1m) = chainOath.getParticipantStatus(supervisors[0]);
+        (, uint16 s2m) = chainOath.getParticipantStatus(supervisors[1]);
 
         assertEq(s1m, 0, "supervisor 1 misses should be 0");
         assertEq(s2m, 1, "supervisor 2 misses should be 1");
@@ -168,13 +191,21 @@ contract ChainOathTest is Test {
         // Simulate all rounds succeeding
         (ChainOath.Oath memory oath, ,) = chainOath.getOathDetails();
         uint16 totalRounds = oath.checkRoundsCount;
+        ChainOath.CheckResult[] memory results = new ChainOath.CheckResult[](committers.length);
+        for (uint j = 0; j < committers.length; j++) {
+            results[j] = ChainOath.CheckResult({
+                committer: committers[j],
+                result: true
+            });
+        }
+        
         for (uint i = 1; i <= totalRounds; i++) {
             vm.warp(startTime + (i - 1) * checkInterval);
             vm.startPrank(supervisors[0]);
-            chainOath.supervisorCheck(true);
+            chainOath.supervisorCheck(results);
             vm.stopPrank();
             vm.startPrank(supervisors[1]);
-            chainOath.supervisorCheck(true);
+            chainOath.supervisorCheck(results);
             vm.stopPrank();
         }
 
@@ -184,9 +215,11 @@ contract ChainOathTest is Test {
 
         chainOath.settleOath();
 
-        uint256 expectedCommitterGain = committerStake;
-        uint256 reward = (totalReward * supervisorRewardRatio / 100) / supervisors.length;
-        uint256 expectedSupervisorGain = supervisorStake + reward;
+        uint256 committerRewardPool = totalReward * (100 - supervisorRewardRatio) / 100;
+        uint256 committerReward = committerRewardPool / committers.length;
+        uint256 expectedCommitterGain = committerStake + committerReward;
+        uint256 supervisorReward = (totalReward * supervisorRewardRatio / 100) / supervisors.length;
+        uint256 expectedSupervisorGain = supervisorStake + supervisorReward;
 
         assertEq(committers[0].balance, c0BalanceBefore + expectedCommitterGain, "committer 0 balance mismatch");
         assertEq(supervisors[0].balance, s0BalanceBefore + expectedSupervisorGain, "supervisor 0 balance mismatch");
@@ -196,8 +229,16 @@ contract ChainOathTest is Test {
         _fullSetupAndStart();
 
         // Round 1: failure
+        ChainOath.CheckResult[] memory results = new ChainOath.CheckResult[](committers.length);
+        for (uint i = 0; i < committers.length; i++) {
+            results[i] = ChainOath.CheckResult({
+                committer: committers[i],
+                result: false
+            });
+        }
+        
         vm.startPrank(supervisors[0]);
-        chainOath.supervisorCheck(false);
+        chainOath.supervisorCheck(results);
         vm.stopPrank();
 
         vm.warp(endTime + 1);

@@ -8,6 +8,12 @@ import "./Ownerable.sol";
 
 contract ChainOath is Ownerable {
 
+    /// @notice 监督者检查结果结构体
+    struct CheckResult {
+        address committer;  // 守约者地址
+        bool result;        // 评估结果
+    }
+
     // 事件定义
     event CheckRoundStarted(uint16 indexed roundId, uint32 startTime, uint32 endTime);
     event SupervisorSigned(uint16 indexed roundId, address indexed supervisor, bool result);
@@ -16,8 +22,8 @@ contract ChainOath is Ownerable {
     event OathStatusChanged(OathStatus previousStatus, OathStatus newStatus); 
 
     //  合约创建者
-    address public immutable creater;
-    uint16 public immutable createTime;
+    address public immutable creator;
+    uint32 public immutable createTime;
     //  誓约是否已结算
     bool public settled;
     //  总的配置
@@ -43,10 +49,17 @@ contract ChainOath is Ownerable {
     mapping(uint16 => mapping(address => bool)) public checkSignatures; 
     //  轮次 => 已签名的监督者数量
     mapping(uint16 => uint16) public roundSignatureCount;
-
     //  轮次 => 监督者地址 => 守约者地址 => 是否成功
     mapping(uint16 => mapping(address => mapping(address => bool))) public checkResults; 
-
+    
+    //  监督者失职次数统计
+    mapping(address => uint16) public supervisorMisses;
+    //  守约者失约次数统计  
+    mapping(address => uint16) public committerFailures;
+    //  监督者已获得的奖励次数
+    mapping(address => uint16) public supervisorRewardCount;
+    //  轮次 => 是否已结算奖励
+    mapping(uint16 => bool) public roundRewardSettled; 
 
     /// @notice 表示誓约当前状态的枚举
     enum OathStatus {
@@ -54,7 +67,8 @@ contract ChainOath is Ownerable {
         Accepted,   // 已被接受
         Fulfilled,  // 誓言已履行
         Broken,     // 誓言未履行
-        Aborted     // 因为种种原因被废止了
+        Aborted,    // 因为种种原因被废止了
+        Cancelled   // 已取消
     }
 
     /// @notice 表示多方之间誓约的结构体
@@ -95,13 +109,13 @@ contract ChainOath is Ownerable {
         require(_oath.maxCommitterFailures > 0, "Max committer failures must be greater than zero");
         require(_oath.startTime < _oath.endTime, "Start time must be before end time");
         require(_oath.startTime >= block.timestamp, "Start time must be in the future");
-        require(msg.value >= _oath.totalReward, "The creator must pledge the stipulated amount");
+        require(msg.value == _oath.totalReward, "The creator must pledge the exact amount");
 
         //   创建者质押奖励
-        roleStakes[msg.sender] = _oath.totalReward;
+        roleStakes[msg.sender] = uint16(_oath.totalReward);
 
-        creater = msg.sender;
-        createTime = uint16(block.timestamp);
+        creator = msg.sender;
+        createTime = uint32(block.timestamp);
         status = OathStatus.Pending;
         currentCheckRound = 0;
 
@@ -119,10 +133,14 @@ contract ChainOath is Ownerable {
         uint32 totalRounds = (timeSpan + oath.checkInterval - 1) / oath.checkInterval;
         oath.checkRoundsCount = uint16(totalRounds);
 
-
-        //   todo  初始化资金分赃比例 
-
-
+        //   初始化各角色的失职/失约次数为0
+        for (uint i = 0; i < _oath.supervisors.length; i++) {
+            supervisorMisses[_oath.supervisors[i]] = 0;
+            supervisorRewardCount[_oath.supervisors[i]] = 0;
+        }
+        for (uint i = 0; i < _oath.committers.length; i++) {
+            committerFailures[_oath.committers[i]] = 0;
+        }
     }
 
     /// @notice 允许监督者签署并同意当前誓约的函数
@@ -134,7 +152,7 @@ contract ChainOath is Ownerable {
         require(status == OathStatus.Pending, "Oath not in pending state");
         require(!checkSignatures[0][msg.sender], "Supervisor already signed");
         require(msg.value == oath.supervisorStake, "Incorrect stake amount");
-        require(block.timestamp > oath.startTime, "The oath has already begun");
+        require(block.timestamp < oath.startTime, "The oath has already begun");
 
         checkSignatures[0][msg.sender] = true;
         roundSignatureCount[0]++;
@@ -151,28 +169,29 @@ contract ChainOath is Ownerable {
         }
     }
 
-    /// @notice 守约人签署并质押参与誓约的函数
-    function committerSign021() external payable onlyCommitter() {
+    /// @notice 守约人质押参与誓约的函数
+    function committerStake() external payable onlyCommitter() {
         require(status == OathStatus.Pending, "Oath not in pending state");
-        require(roleStakes[msg.sender] >= oath.committerStake, "Committer already signed");
+        require(roleStakes[msg.sender] == 0, "Committer already staked");
         require(msg.value == oath.committerStake, "Incorrect stake amount");
-        require(block.timestamp > oath.startTime, "The oath has already begun");
+        require(block.timestamp < oath.startTime, "The oath has already begun");
 
-        checkSignatures[0][msg.sender] = true;
-        roleStakes[msg.sender] += oath.committerStake;
+        roleStakes[msg.sender] = oath.committerStake;
 
+        // 检查是否所有守约人都已质押
         bool allStaked = true;
         for (uint i = 0; i < oath.committers.length; i++) {
-            if ( roleStakes[oath.committers[i]] < oath.committerStake ) {
+            if (roleStakes[oath.committers[i]] < oath.committerStake) {
                 allStaked = false;
                 break;
             }
         }
 
-        if ( allStaked ) {
+        if (allStaked) {
             allCommittersStaked = true;
         }
 
+        // 如果所有监督者都已签名且所有守约人都已质押，则开始誓约
         if (allSupervisorsSigned0 && allCommittersStaked) {
             status = OathStatus.Accepted;
             emit OathStatusChanged(OathStatus.Pending, OathStatus.Accepted);
@@ -194,13 +213,40 @@ contract ChainOath is Ownerable {
         } else {
             require(settled, "Oath not settled yet");
 
-            //   todo
-            //   如果合约已经结算了， 如果是守约者失约， 那么创建者可以拿走因为违约产生的所有奖励， 包括 守约者质押， 不称职的监督者质押
-            //   如果守约者成功守约， 创建者能拿走不称职的监督者的质押
-
-
-
-
+            // 创建者可以提取的资金：
+            // 1. 如果守约者失约，创建者可以拿走剩余的奖励池
+            // 2. 不称职监督者的质押金
+            uint256 withdrawAmount = 0;
+            
+            // 计算不称职监督者的质押金
+            for (uint i = 0; i < oath.supervisors.length; i++) {
+                address supervisor = oath.supervisors[i];
+                if (supervisorMisses[supervisor] > oath.maxSupervisorMisses) {
+                    withdrawAmount += oath.supervisorStake;
+                }
+            }
+            
+            // 如果是守约失败状态，创建者还可以拿走未分配的奖励池余额
+            if (status == OathStatus.Broken) {
+                // 计算已分配给监督者的奖励
+                uint256 distributedRewards = 0;
+                for (uint i = 0; i < oath.supervisors.length; i++) {
+                    distributedRewards += supervisorRewardCount[oath.supervisors[i]] * 
+                        ((oath.totalReward * oath.supervisorRewardRatio / 100)
+                        / oath.checkRoundsCount / get021Supervisors());
+                }
+                
+                // 剩余的奖励池资金
+                uint256 remainingRewards = oath.totalReward > distributedRewards ? 
+                    oath.totalReward - distributedRewards : 0;
+                withdrawAmount += remainingRewards;
+            }
+            
+            if (withdrawAmount > 0) {
+                roleStakes[msg.sender] = 0;
+                (bool success, ) = payable(msg.sender).call{value: withdrawAmount}("");
+                require(success, "Creator withdrawal failed");
+            }
         }
 
     }
@@ -219,11 +265,32 @@ contract ChainOath is Ownerable {
         } else {
             require(settled, "Oath not settled yet");
 
-            //   todo
-            //   如果合约已经结算了， 校验监督者在这个阶段里面是否称职 （不称职次数 > oath.maxSupervisorMisses 为不称职）
-            //   称职的监督者可以拿回自己的质押 （这里不算奖励， 奖励会在每次监督者验证签名之后直接发放）
-
-
+            // 监督者可以提取的资金：
+            // 1. 如果监督者称职（未超过最大失职次数），可以拿走质押金
+            // 2. 监督者的奖励（基于参与检查的次数）
+            uint256 withdrawAmount = 0;
+            
+            // 如果监督者称职，返还质押金
+            if (supervisorMisses[msg.sender] <= oath.maxSupervisorMisses) {
+                withdrawAmount += oath.supervisorStake;
+            }
+            
+            // 计算监督者的奖励
+            // 首先计算实际参与质押的监督者数量
+            uint256 qualifiedSupervisorCount = get021Supervisors();
+            
+            if (qualifiedSupervisorCount > 0) {
+                 // 每个监督者的奖励 = 总监督者奖励池 / 实际参与的监督者数量
+                 uint256 totalSupervisorReward = oath.totalReward * oath.supervisorRewardRatio / 100;
+                 uint256 supervisorReward = totalSupervisorReward / qualifiedSupervisorCount;
+                 withdrawAmount += supervisorReward;
+             }
+            
+            if (withdrawAmount > 0) {
+                roleStakes[msg.sender] = 0;
+                (bool success, ) = payable(msg.sender).call{value: withdrawAmount}("");
+                require(success, "Supervisor withdrawal failed");
+            }
         }
 
     }
@@ -242,54 +309,88 @@ contract ChainOath is Ownerable {
         } else {
             require(settled, "Oath not settled yet");
 
-            //   todo
-            //   如果合约已经结算了， 校验守约者在这个阶段里面是否称职 （不称职次数 < oath.maxCommitterFailures 为称职）
-            //   称职的守约者可以拿回自己的质押 （这里不算奖励， 奖励会在每次监督者验证签名之后直接发放）
-
-
+            // 守约者可以提取的资金：
+            // 1. 如果守约成功（状态为Fulfilled），可以拿走质押金和奖励
+            // 2. 如果守约失败（状态为Broken），质押金被没收，无法提取
+            uint256 withdrawAmount = 0;
+            
+            if (status == OathStatus.Fulfilled) {
+                // 守约成功，返还质押金
+                withdrawAmount += oath.committerStake;
+                
+                // 计算守约者的奖励（剩余奖励池的一部分）
+                uint256 committerRewardPool = oath.totalReward * (100 - oath.supervisorRewardRatio) / 100;
+                uint256 committerReward = committerRewardPool / oath.committers.length;
+                withdrawAmount += committerReward;
+            }
+            
+            if (withdrawAmount > 0) {
+                roleStakes[msg.sender] = 0;
+                (bool success, ) = payable(msg.sender).call{value: withdrawAmount}("");
+                require(success, "Committer withdrawal failed");
+            }
         }
 
     }
-
-
     
-    ///  @notice 监督者在检查周期内对守约人表现进行评估
-    function supervisorCheck(address[] calldata addresses, bool[] calldata results) external onlySupervisor() {
+    /// @notice 监督者在检查周期内对守约人表现进行评估（对每个守约者分别评估）
+    /// @param results 对每个守约者的评估结果结构体数组
+    function supervisorCheck(CheckResult[] calldata results) external onlySupervisor() {
         require(status == OathStatus.Accepted, "Oath not in accepted state");
-        require(addresses.length == results.length, "Mismatched input lengths");
         require(currentCheckRound > 0 && currentCheckRound <= oath.checkRoundsCount, "Not a valid check round");
+        require(results.length == oath.committers.length, "Results array length must match committers count");
 
-        uint32 time = block.timestamp;
+        uint32 time = uint32(block.timestamp);
         uint32 diffWithStartTime = time - oath.startTime;
         //   算出来的当前时间点所处的检查轮次
-        uint16 index = diffWithStartTime / oath.checkInterval;
+        uint16 index = uint16(diffWithStartTime / oath.checkInterval) + 1;
         require(index <= oath.checkRoundsCount, "Check round out of bounds");
         require(!checkSignatures[index][msg.sender], "Supervisor has already signed in this round");
 
-        uint32 timeShouldSignWindow = oath.startTime + index * oath.checkInterval + oath.checkWindow;
+        uint32 timeShouldSignWindow = oath.startTime + (index - 1) * oath.checkInterval + oath.checkWindow;
         require(time <= timeShouldSignWindow, "Check window has passed");
 
         //   开始评估逻辑
-        if (index >= currentCheckRound) {
+        if (index > currentCheckRound) {
             currentCheckRound = index;
             emit CheckRoundStarted(currentCheckRound, uint32(block.timestamp), uint32(block.timestamp + oath.checkWindow));
         }
 
         checkSignatures[index][msg.sender] = true;
-        roundSignatureCount[index] ++;
+        roundSignatureCount[index]++;
 
-        for (uint i = 0; i < addresses.length; i ++) {
-            require(isCommitter[addresses[i]], "Address is not a committer");
-
+        // 验证并记录每个守约人的评估结果
+        for (uint i = 0; i < results.length; i++) {
+            address committer = results[i].committer;
+            bool result = results[i].result;
             
+            // 验证committer地址是否为有效的守约者
+            require(isCommitter[committer], "Invalid committer address");
+            
+            // 记录评估结果
+            checkResults[index][msg.sender][committer] = result;
+            
+            // 发出事件
+            emit SupervisorSigned(index, msg.sender, result);
         }
-
+        
+        // 检查是否达到阈值，如果失败比例过高则直接设置为违约状态
+        _checkRoundResult(index);
+        
+        // 检查是否所有监督者都已投票，如果是且结果为成功，则进入下一轮
+        if (roundSignatureCount[index] == oath.supervisors.length && status != OathStatus.Broken) {
+            // 所有监督者都已投票且没有违约，检查是否完成所有轮次
+            if (index >= oath.checkRoundsCount) {
+                // 所有轮次完成，设置为履行状态
+                status = OathStatus.Fulfilled;
+                emit OathStatusChanged(OathStatus.Accepted, OathStatus.Fulfilled);
+            } else {
+                // 还有下一轮，推进到下一轮
+                currentCheckRound = index + 1;
+                emit CheckRoundStarted(currentCheckRound, uint32(block.timestamp), uint32(block.timestamp + oath.checkWindow));
+            }
+        }
     }
-
-    
-
-
-
 
     function checkAndStartOath() internal {
         require(status == OathStatus.Accepted, "Oath not accepted");
@@ -298,7 +399,209 @@ contract ChainOath is Ownerable {
         currentCheckRound = 1;
         emit CheckRoundStarted(1, uint32(block.timestamp), uint32(block.timestamp + oath.checkWindow));
     }
-
+    
+    /// @notice 检查当前轮次的结果，判断是否需要更新誓约状态
+    function _checkRoundResult(uint16 roundId) internal {
+        uint16 failureVotes = 0;
+        uint16 totalVotes = 0;
+        
+        // 统计每个监督者的投票情况
+        for (uint i = 0; i < oath.supervisors.length; i++) {
+            if (checkSignatures[roundId][oath.supervisors[i]]) {
+                totalVotes++;
+                bool supervisorResult = true;
+                // 检查该监督者对所有守约者的评估，如果有任何一个失败则认为该监督者投票失败
+                for (uint j = 0; j < oath.committers.length; j++) {
+                    if (!checkResults[roundId][oath.supervisors[i]][oath.committers[j]]) {
+                        supervisorResult = false;
+                        break;
+                    }
+                }
+                if (!supervisorResult) {
+                    failureVotes++;
+                }
+            }
+        }
+        
+        // 如果失败投票比例超过阈值，设置为违约状态
+        if (totalVotes > 0 && (failureVotes * 100 / totalVotes) >= (100 - oath.checkThresholdPercent)) {
+            status = OathStatus.Broken;
+            emit OathStatusChanged(OathStatus.Accepted, OathStatus.Broken);
+            
+            // 记录每个守约者的失约次数（基于所有监督者的评估）
+            for (uint i = 0; i < oath.committers.length; i++) {
+                address committer = oath.committers[i];
+                uint16 committerFailureVotes = 0;
+                uint16 committerTotalVotes = 0;
+                
+                // 统计对该守约者的失败投票
+                for (uint j = 0; j < oath.supervisors.length; j++) {
+                    if (checkSignatures[roundId][oath.supervisors[j]]) {
+                        committerTotalVotes++;
+                        if (!checkResults[roundId][oath.supervisors[j]][committer]) {
+                            committerFailureVotes++;
+                        }
+                    }
+                }
+                
+                // 如果该守约者的失败比例超过阈值，增加其失约次数
+                if (committerTotalVotes > 0 && (committerFailureVotes * 100 / committerTotalVotes) >= (100 - oath.checkThresholdPercent)) {
+                    committerFailures[committer]++;
+                    emit CommitterFailed(committer, committerFailures[committer]);
+                }
+            }
+        }
+    }
+     
+    /// @notice 结算当前检查轮次，处理未签名的监督者
+    function finalizeCheckRound() external {
+        require(status == OathStatus.Accepted, "Oath not in accepted state");
+        require(currentCheckRound > 0 && currentCheckRound <= oath.checkRoundsCount, "Invalid check round");
+        
+        uint32 currentTime = uint32(block.timestamp);
+        uint32 roundEndTime = oath.startTime + (currentCheckRound - 1) * oath.checkInterval + oath.checkWindow;
+        require(currentTime > roundEndTime, "Check window has not ended yet");
+        require(!roundRewardSettled[currentCheckRound], "Round already finalized");
+        
+        // 处理未签名的监督者，增加其失职次数
+        for (uint i = 0; i < oath.supervisors.length; i++) {
+            address supervisor = oath.supervisors[i];
+            if (!checkSignatures[currentCheckRound][supervisor]) {
+                supervisorMisses[supervisor]++;
+                emit SupervisorMissed(supervisor, supervisorMisses[supervisor]);
+                
+                // 如果失职次数超过限制，该监督者将失去所有质押
+                if (supervisorMisses[supervisor] > oath.maxSupervisorMisses) {
+                    // 监督者质押将在最终结算时处理
+                }
+            } else {
+                // 记录已签名的监督者（奖励在最终结算时发放）
+                supervisorRewardCount[supervisor]++;
+            }
+        }
+        
+        roundRewardSettled[currentCheckRound] = true;
+        
+        // 检查是否完成所有轮次
+        if (currentCheckRound >= oath.checkRoundsCount) {
+            // 所有轮次完成，设置为履行状态
+            status = OathStatus.Fulfilled;
+            emit OathStatusChanged(OathStatus.Accepted, OathStatus.Fulfilled);
+        } else {
+            // 还有下一轮，推进到下一轮
+            currentCheckRound++;
+            emit CheckRoundStarted(currentCheckRound, uint32(block.timestamp), uint32(block.timestamp + oath.checkWindow));
+        }
+    }
+    
+    /// @notice 结算誓约，分配最终奖励和质押
+    function settleOath() external {
+        require(
+            status == OathStatus.Fulfilled || status == OathStatus.Broken,
+            "Oath not ready for settlement"
+        );
+        require(!settled, "Oath already settled");
+        require(block.timestamp >= oath.endTime, "Oath period not ended yet");
+        
+        settled = true;
+        
+        if (status == OathStatus.Fulfilled) {
+            // 守约成功的情况
+            // 1. 称职的监督者取回质押和总奖励
+            // 首先计算实际参与质押的监督者数量
+            uint256 qualifiedSupervisorCount = 0;
+            for (uint i = 0; i < oath.supervisors.length; i++) {
+                if (roleStakes[oath.supervisors[i]] > 0) {
+                    qualifiedSupervisorCount++;
+                }
+            }
+            
+            for (uint i = 0; i < oath.supervisors.length; i++) {
+                address supervisor = oath.supervisors[i];
+                if (supervisorMisses[supervisor] <= oath.maxSupervisorMisses && roleStakes[supervisor] > 0) {
+                     uint256 supervisorReward = 0;
+                     if (qualifiedSupervisorCount > 0) {
+                         // 每个监督者的奖励 = 总监督者奖励池 / 实际参与的监督者数量
+                         uint256 totalSupervisorReward = oath.totalReward * oath.supervisorRewardRatio / 100;
+                         supervisorReward = totalSupervisorReward / qualifiedSupervisorCount;
+                     }
+                     uint256 totalReturn = oath.supervisorStake + supervisorReward;
+                     roleStakes[supervisor] = 0; // 清零质押记录
+                     if (totalReturn > 0) {
+                         (bool success, ) = payable(supervisor).call{value: totalReturn}("");
+                         require(success, "Supervisor return failed");
+                     }
+                 }
+            }
+            
+            // 2. 守约者取回质押和奖励
+            uint256 committerRewardPool = oath.totalReward * (100 - oath.supervisorRewardRatio) / 100;
+            uint256 committerReward = committerRewardPool / oath.committers.length;
+            
+            for (uint i = 0; i < oath.committers.length; i++) {
+                address committer = oath.committers[i];
+                if (committerFailures[committer] <= oath.maxCommitterFailures) {
+                    uint256 totalReturn = oath.committerStake + committerReward;
+                    roleStakes[committer] = 0; // 清零质押记录
+                    if (totalReturn > 0) {
+                        (bool success, ) = payable(committer).call{value: totalReturn}("");
+                        require(success, "Committer return failed");
+                    }
+                }
+            }
+            
+        } else if (status == OathStatus.Broken) {
+            // 守约失败的情况
+            // 1. 称职的监督者获得守约人的质押作为额外奖励
+            uint256 totalCommitterStakes = oath.committerStake * oath.committers.length;
+            uint16 competentSupervisors = 0;
+            
+            // 计算称职的监督者数量
+            for (uint i = 0; i < oath.supervisors.length; i++) {
+                if (supervisorMisses[oath.supervisors[i]] <= oath.maxSupervisorMisses) {
+                    competentSupervisors++;
+                }
+            }
+            
+            // 分配给称职的监督者
+            if (competentSupervisors > 0) {
+                uint256 rewardPerSupervisor = totalCommitterStakes / competentSupervisors;
+                for (uint i = 0; i < oath.supervisors.length; i++) {
+                    address supervisor = oath.supervisors[i];
+                    if (supervisorMisses[supervisor] <= oath.maxSupervisorMisses) {
+                        uint256 totalReward = oath.supervisorStake + rewardPerSupervisor;
+                        roleStakes[supervisor] = 0; // 清零质押记录
+                        if (totalReward > 0) {
+                            (bool success, ) = payable(supervisor).call{value: totalReward}("");
+                            require(success, "Supervisor reward transfer failed");
+                        }
+                    }
+                }
+            }
+            
+            // 清零失约守约者的质押记录（质押金已被没收）
+            for (uint i = 0; i < oath.committers.length; i++) {
+                roleStakes[oath.committers[i]] = 0;
+            }
+        }
+    }
+       
+    /// @notice 获取誓约详细信息
+    function getOathDetails() external view returns (Oath memory, OathStatus, uint16) {
+        return (oath, status, currentCheckRound);
+    }
+    
+    /// @notice 获取参与者状态信息
+    function getParticipantStatus(address participant) external view returns (uint16, uint16) {
+        if (isSupervisor[participant]) {
+            return (supervisorRewardCount[participant], supervisorMisses[participant]);
+        } else if (isCommitter[participant]) {
+            return (0, committerFailures[participant]);
+        } else {
+            return (0, 0);
+        }
+    }
+   
     /// @notice 如果合约超过了规定开始时间还没有开始， 各个角色可以拿走自己的质押
     function refundTheMoneyBeforeItStarts() internal {
         //   如果合约还没有开始， 则创建者智能拿走本属于他的哪部分质押
@@ -306,12 +609,24 @@ contract ChainOath is Ownerable {
         require(status == OathStatus.Pending, "Oath not in pending state");
 
         uint16 withdrawNums = roleStakes[msg.sender];
-        require(withdrawNums > 0, "No stake to withdraw");
-        roleStakes[msg.sender] = 0;
-        (bool success, ) = payable(msg.sender).call{value: withdrawNums}("");
-        require(success, "Withdrawal failed");
-        status = OathStatus.Aborted;
-        emit OathStatusChanged(status, OathStatus.Aborted); 
+         require(withdrawNums > 0, "No stake to withdraw");
+         roleStakes[msg.sender] = 0;
+         (bool success, ) = payable(msg.sender).call{value: withdrawNums}("");
+         require(success, "Withdrawal failed");
+         
+        // 设置状态为取消
+        status = OathStatus.Cancelled;
+        emit OathStatusChanged(OathStatus.Pending, OathStatus.Cancelled); 
+    }
+
+    function get021Supervisors() internal view returns (uint256) {
+        uint256 qualifiedSupervisorCount = 0;
+        for (uint i = 0; i < oath.supervisors.length; i++) {
+            if (roleStakes[oath.supervisors[i]] > 0) {
+                qualifiedSupervisorCount++;
+            }
+        }
+        return qualifiedSupervisorCount;
     }
 
     /// @notice 确保只有监督者可以调用特定函数的修饰器
