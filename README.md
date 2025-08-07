@@ -146,9 +146,9 @@ ChainOath 采用纯 DApp 架构，前端直接与区块链和去中心化存储�
 
 | 角色 | 描述 | 是否需质押 | 是否可获奖 | 是否影响誓约状态 |
 |------|------|------------|------------|------------------|
-| **发起人 Creator** | 创建誓约，设定奖励池、配置规则、分配角色 | ✅（质押全部奖励） | ❌ | ✅（设定规则） |
-| **守约人 Committer** | 接受任务，履行誓约，被监督签名评定 | ✅（履约押金，可配置） | ✅ | ✅（是否守约） |
-| **监督者 Supervisor** | 定期进行 check 并签名，评定守约人行为 | ✅（质押金，可配置） | ✅（按 check 次数） | ✅（监督决定） |
+| **创建者 Creator** | 创建誓约，设定奖励池、配置规则、分配角色 | ✅（质押全部奖励池） | ✅（领取剩余资金） | ✅（设定规则） |
+| **守约人 Committer** | 接受任务，履行誓约，被监督者评定 | ✅（履约押金，可配置） | ✅（完成时获得奖励） | ✅（是否守约） |
+| **监督者 Supervisor** | 定期进行检查并提交评定，监督守约人行为 | ✅（监督押金，可配置） | ✅（按成功检查次数） | ✅（监督决定） |
 | **查看者 Viewer** | 仅查看誓约详情与状态 | ❌ | ❌ | ❌ |
 
 ---
@@ -158,29 +158,23 @@ ChainOath 采用纯 DApp 架构，前端直接与区块链和去中心化存储�
 ### 主要数据结构
 
 ```solidity
-// 检查结果结构体
-struct CheckResult {
-    address committer;  // 守约人地址
-    bool result;        // 检查结果 (true: 守约, false: 违约)
-}
-
 // 誓约状态枚举
 enum OathStatus {
-    Pending,    // 待开始
-    Accepted,   // 已接受，进行中
-    Fulfilled,  // 已完成
-    Broken,     // 已违约
-    Cancelled   // 已取消
+    Pending,    // 创建后尚未接受
+    Accepted,   // 已被接受（所有角色成功在startTime之前完成了质押确认）
+    Fulfilled,  // 誓言已履行（完成最后一轮监督者监督，并受约人满足守约条件）
+    Broken,     // 誓言未履行（受约人誓约次数 > maxCommitterFailures）
+    Aborted     // 因为种种原因被废止了
 }
 
 // 誓约主体结构
 struct Oath {
-    string title;                     // 誓约标题
-    string description;               // 誓约描述
-    address[] committers;            // 守约人列表
-    address[] supervisors;           // 监督者列表
+    string title;                    // 誓约标题
+    string description;              // 誓约描述
+    address committer;               // 守约人，唯一
+    address[] supervisors;           // 监督者列表，可以有多个
     uint256 totalReward;             // Creator 总质押奖励金额
-    uint256 committerStake;          // 每位守约人需质押金额
+    uint256 committerStake;          // 守约人需质押金额
     uint256 supervisorStake;         // 每位监督者需质押金额
     uint16 supervisorRewardRatio;    // 监督者奖励比例（如 10 表示 10%）
     uint32 checkInterval;            // check 间隔（单位：秒）
@@ -189,73 +183,111 @@ struct Oath {
     uint16 maxSupervisorMisses;      // 监督者最大允许失职次数
     uint16 maxCommitterFailures;     // 守约人最大允许失约次数
     uint16 checkRoundsCount;         // 总检查轮次
-    uint32 startTime;                // 誓约开始时间
-    uint32 endTime;                  // 誓约结束时间
-    uint32 createTime;               // 创建时间
+    uint32 startTime;                // 誓约开始时间（时间戳，单位为s）
+    uint32 endTime;                  // 誓约结束时间（时间戳，单位为s）
+    uint32 createTime;               // 创建时间（时间戳，单位为s）
+    address creator;                 // 创建者地址
+    IERC20 token;                    // 使用的ERC20代币
+    OathStatus status;               // 当前状态
+}
+
+// 监督记录结构
+struct SupervisionRecord {
+    mapping(address => bool) hasChecked;     // 监督者是否已检查
+    mapping(address => bool) approvals;     // 监督者的批准状态
+    uint16 totalChecked;                    // 总检查人数
+    uint16 totalApproved;                   // 总批准人数
+    bool isCompleted;                       // 本轮是否完成
+    bool isSuccess;                         // 本轮是否成功
+}
+
+// 监督者状态结构
+struct SupervisorStatus {
+    uint16 missCount;                       // 失职次数
+    uint16 successfulChecks;                // 成功检查次数
+    bool isDisqualified;                   // 是否被取消资格
 }
 ```
 
 ### 核心功能函数
 
 ```solidity
-// 监督者签署初始协议并质押
-function supervisorSign021() external payable
+// 创建新的誓约
+function createOath(Oath memory _oath, address _token) external nonReentrant
 
 // 守约人质押加入誓约
-function committerStake() external payable
+function committerStake(uint256 _oathId, address _token, uint256 _amount) external nonReentrant
+
+// 监督者质押加入誓约
+function supervisorStake(uint256 _oathId, address _token, uint256 _amount) external nonReentrant
 
 // 监督者提交检查结果
-function supervisorCheck(CheckResult[] calldata results) external
+function submitSupervision(uint256 _oathId, bool _approval) external nonReentrant
 
-// 结算检查轮次
-function finalizeCheckRound() external
+// 处理超时的监督轮次
+function processTimeoutRound(uint256 _oathId) external
 
-// 最终结算誓约
-function settleOath() external
+// 领取奖励
+function claimReward(uint256 _oathId) external nonReentrant
 
-// 获取誓约详细信息
-function getOathDetails() external view returns (Oath memory, OathStatus, uint16)
+// 检查并更新誓约状态
+function checkOathStatus(uint256 _oathId) external
+
+// 退回质押金（仅在誓约被废止时）
+function refundStake(uint256 _oathId) external nonReentrant
+
+// 获取誓约信息
+function getOath(uint256 _oathId) external view returns (Oath memory)
+
+// 获取监督记录
+function getSupervisionRecord(uint256 _oathId, uint16 _round) external view
+
+// 获取监督者状态
+function getSupervisorStatus(uint256 _oathId, address _supervisor) external view
 ```
 
 ## 3. 誓约流程说明
 
-**阶段 1：创建**
+**阶段 1：创建与质押**
 
-Creator 创建誓约，配置上述所有参数并质押 totalReward。
-
-守约人和监督者分别调用质押函数，缴纳履约/监督押金。
+1. **创建者（Creator）** 调用 `createOath()` 创建誓约，配置所有参数并质押 `totalReward` 作为奖励池
+2. **守约人（Committer）** 调用 `committerStake()` 质押履约押金
+3. **监督者（Supervisor）** 调用 `supervisorStake()` 质押监督押金
+4. 当所有角色都完成质押且在 `startTime` 之前，誓约状态变为 `Accepted`
+5. 如果在 `startTime` 之前未完成所有质押，誓约状态变为 `Aborted`
 
 **阶段 2：监督与履约**
 
-每隔 checkInterval 触发一个监督周期：
+1. **监督周期**：每隔 `checkInterval` 触发一个监督轮次
+2. **监督窗口**：监督者需在轮次开始后的 `checkWindow` 时间内提交评定
+3. **监督评定**：监督者调用 `submitSupervision()` 提交 `true`（守约）或 `false`（失约）
+4. **失职处理**：
+   - 未在时间窗口内提交评定 → 记录失职一次
+   - 失职次数超过 `maxSupervisorMisses` → 监督者被取消资格，质押金被没收
+5. **轮次判定**：
+   - 有效监督者中批准比例 ≥ `checkThresholdPercent` → 该轮次守约成功
+   - 否则 → 该轮次守约失败，记录守约人失败一次
+6. **誓约终止条件**：
+   - 守约人失败次数超过 `maxCommitterFailures` → 誓约状态变为 `Broken`
+   - 完成所有轮次且未超过失败限制 → 誓约状态变为 `Fulfilled`
 
-监督者需在 checkWindow 内签名表达“守约”或“失约”判断。
+**阶段 3：奖励分配与结算**
 
-若签名未提交 → 判定为失职，本次奖励转入守约人奖励池。
+1. **守约人奖励**（誓约完成时）：
+   - 获得奖励池中 `(100 - supervisorRewardRatio)%` 的金额
+   - 取回自己的质押金
 
-若监督者失职次数超 maxSupervisorMisses → 其质押金被没收，归守约人。
+2. **监督者奖励**：
+   - 按成功检查次数分配监督者总奖励
+   - 未被取消资格的监督者可取回质押金
+   - 被取消资格的监督者失去质押金
 
-若有效签名中 守约 占比 ≥ checkThresholdPercent → 判定该周期守约成功。
+3. **创建者收益**：
+   - 守约人失约时，可领取剩余的奖励池资金
+   - 可领取被没收的质押金
 
-若守约失败次数超出 maxCommitterFailures → 判定整体誓约失败，守约人失去奖励，其质押金被没收，返还给 Creator。
-
-**阶段 3：结算**
-
-守约人成功完成任务：
-
-- 获得奖励池中 committerRewardRatio 对应金额；
-- 获得监督者失职转入的奖励；
-- 取回自己质押金额。
-
-守约人失约（失败次数超限）：
-
-- 奖励池返还给 Creator；
-- 守约人质押金没收。
-
-监督者：
-
-- 每完成一个有效 check 签名，可领取 (supervisorRewardRatio / 总check次数) 的奖励；
-- 若失职次数超限 → 所有质押金被没收。
+4. **特殊情况**：
+   - 誓约被废止（`Aborted`）时，所有参与者可通过 `refundStake()` 取回质押金
 
 ---
 
@@ -263,45 +295,77 @@ Creator 创建誓约，配置上述所有参数并质押 totalReward。
 
 ### 奖励分配公式
 
-```sql
+```javascript
+// 基础奖励分配
 监督者总奖励 = totalReward × (supervisorRewardRatio / 100)
-守约人总奖励 = totalReward × (committerRewardRatio / 100)
-每次 check 奖励 = 监督者总奖励 / 总 check 次数
+守约人总奖励 = totalReward × ((100 - supervisorRewardRatio) / 100)
+
+// 监督者个人奖励计算
+有效监督者数量 = 已质押且未被取消资格的监督者数量
+单个监督者基础奖励 = 监督者总奖励 / 有效监督者数量 / 总检查轮次
+监督者实际奖励 = 单个监督者基础奖励 × 该监督者成功检查次数
+
+// 创建者剩余资金
+创建者可领取金额 = 合约剩余代币余额（包括未分配奖励和被没收质押金）
 ```
 
 ### 惩罚规则
 
-| 行为 | 惩罚结果 |
-|------|----------|
-| 监督者未 check | 当次奖励归守约人，记录失职一次 |
-| 监督者累计失职超限 | 没收全部质押金，奖励归守约人 |
-| 守约人未完成任务次数超限 | 没收质押金，失去奖励，奖励归 Creator |
+| 违规行为 | 惩罚结果 | 影响范围 |
+|----------|----------|----------|
+| 监督者未在时间窗口内提交评定 | 记录失职一次 | 个人失职计数 |
+| 监督者累计失职超过 `maxSupervisorMisses` | 被取消资格，没收全部质押金 | 失去奖励和质押金 |
+| 守约人单轮次未通过监督评定 | 记录失败一次 | 个人失败计数 |
+| 守约人累计失败超过 `maxCommitterFailures` | 誓约状态变为 `Broken`，没收质押金 | 失去奖励和质押金 |
+| 质押期结束前未完成所有质押 | 誓约状态变为 `Aborted` | 所有人可退回质押金 |
+
+### 代币支持
+
+- **支持 ERC20 代币**：合约支持任意 ERC20 代币作为质押和奖励代币
+- **灵活配置**：创建者可指定使用的代币类型
+- **安全转账**：使用 `transferFrom` 和 `transfer` 确保代币安全
 
 ---
 
-## 5. 状态管理与签名结构（示例）
+## 5. 关键特性与安全机制
 
-```solidity
-enum OathStatus { Pending, Active, Completed, Breached, Cancelled }
-enum CheckResult { Pending, Success, Failed }
+### 时间管理
+- **自动轮次计算**：根据 `checkInterval` 自动计算当前监督轮次
+- **时间窗口控制**：监督者必须在指定的 `checkWindow` 内提交评定
+- **超时处理**：支持通过 `processTimeoutRound()` 处理超时的监督轮次
 
-struct Check {
-  uint256 slotId;
-  address supervisor;
-  CheckResult result;
-  bytes32 reasonHash;
-  bool rewarded;
-}
-```
+### 状态同步
+- **实时状态更新**：誓约状态根据参与者行为自动更新
+- **条件检查**：每次质押后自动检查是否满足誓约接受条件
+- **状态查询**：提供丰富的查询接口获取誓约和参与者状态
+
+### 安全保障
+- **重入保护**：所有状态变更函数使用 `nonReentrant` 修饰符
+- **权限控制**：严格的角色权限验证，防止未授权操作
+- **资金安全**：使用 OpenZeppelin 标准库确保代币转账安全
 
 ---
 
-## 6. 安全建议
+## 6. 安全机制与最佳实践
 
-- 所有转账使用 pullPayment 模式，防止重入；
-- 签名采用 EIP-712 标准，确保链下交互安全；
-- 支持链下存储 description 和 证明材料 到 IPFS，引用哈希；
-- 未来可引入 仲裁者角色 处理争议情况（如监督者失联等）。
+### 已实现的安全措施
+- **重入攻击防护**：使用 OpenZeppelin 的 `ReentrancyGuard`，所有资金操作函数都有 `nonReentrant` 保护
+- **权限验证**：严格的角色权限检查，确保只有授权用户可以执行相应操作
+- **状态一致性**：完善的状态检查机制，防止在错误状态下执行操作
+- **时间控制**：精确的时间窗口管理，防止过期操作和时间操纵
+- **代币安全**：使用标准 ERC20 接口，支持 `transferFrom` 和 `transfer` 安全转账
+
+### 设计原则
+- **去中心化**：无需中心化服务器，完全基于智能合约运行
+- **透明性**：所有规则和状态变更都在链上公开可验证
+- **可扩展性**：支持任意 ERC20 代币，灵活的参数配置
+- **用户友好**：提供丰富的查询接口和状态反馈
+
+### 未来改进方向
+- **争议仲裁**：引入去中心化仲裁机制处理特殊争议
+- **链下存储**：支持将详细描述和证明材料存储到 IPFS
+- **多签支持**：支持多重签名增强安全性
+- **治理机制**：引入 DAO 治理优化平台参数
 
 ---
 
