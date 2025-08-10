@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link as RouterLink, useNavigate } from "react-router-dom";
+import BigNumber from "bignumber.js";
 import { contractService } from "../services/contractService";
 import { notificationService } from "../services/notificationService";
 import { getCurrentNetworkConfig } from "../contracts/config";
@@ -53,6 +54,24 @@ interface OathFormData {
   endTime: string;
   tokenAddress: string;
 }
+
+// 辅助函数：将时间和单位转换为秒
+const convertToSeconds = (value: number, unit: string): number => {
+  switch (unit) {
+    case "seconds":
+      return value;
+    case "minutes":
+      return value * 60;
+    case "hours":
+      return value * 3600;
+    case "days":
+      return value * 86400;
+    case "weeks":
+      return value * 604800;
+    default:
+      return value; // 默认为秒
+  }
+};
 
 const CreateOath: React.FC = () => {
   const navigator = useNavigate();
@@ -199,6 +218,12 @@ const CreateOath: React.FC = () => {
       return;
     }
 
+    const uniqueSupervisors = new Set(formData.supervisors.map(addr => addr.toLowerCase()));
+    if (uniqueSupervisors.size !== formData.supervisors.length) {
+        alert("监督者地址不能重复");
+        return;
+    }
+
     if (
       !formData.tokenAddress ||
       formData.tokenAddress.length !== 42 ||
@@ -226,16 +251,29 @@ const CreateOath: React.FC = () => {
       return;
     }
 
+    // 使用 BigNumber.js 处理金额，并转换为合约需要的格式 (wei)
+    const committerStakeInWei = new BigNumber(formData.committerStake)
+      .shiftedBy(18)
+      .toString();
+    const supervisorStakeInWei = new BigNumber(formData.supervisorStake)
+      .shiftedBy(18)
+      .toString();
+
     // 构造合约调用数据
     const oathData = {
       title: formData.title,
       description: formData.description,
       committers: [formData.committer], // 转换为数组
       supervisors: formData.supervisors.filter((addr) => addr.trim() !== ""),
-      committerStakeAmount: formData.committerStake.toString(),
-      supervisorStakeAmount: formData.supervisorStake.toString(),
+      committerStakeAmount: committerStakeInWei,
+      supervisorStakeAmount: supervisorStakeInWei,
       duration: Math.floor((endTimestamp - startTimestamp) / 86400), // 转换为天数
       penaltyRate: formData.supervisorRewardRatio, // 使用监督者奖励比例作为惩罚率
+      checkInterval: convertToSeconds(formData.checkInterval, formData.checkIntervalUnit),
+      checkWindow: convertToSeconds(formData.checkWindow, formData.checkWindowUnit),
+      checkThresholdPercent: formData.checkThresholdPercent,
+      maxSupervisorMisses: formData.maxSupervisorMisses,
+      maxCommitterFailures: formData.maxCommitterFailures,
     };
 
     console.log("提交的誓约数据:", oathData);
@@ -258,7 +296,7 @@ const CreateOath: React.FC = () => {
       );
       console.log("代币余额:", balance);
 
-      if (parseFloat(balance) < formData.committerStake) {
+      if (new BigNumber(balance).isLessThan(formData.committerStake)) {
         throw new Error(
           `代币余额不足，需要 ${formData.committerStake}，当前余额 ${balance}`
         );
@@ -272,12 +310,12 @@ const CreateOath: React.FC = () => {
         networkConfig.chainOathAddress
       );
 
-      if (parseFloat(allowance) < formData.committerStake) {
+      if (new BigNumber(allowance).isLessThan(formData.committerStake)) {
         console.log("需要授权代币...");
         const approveTx = await contractService.approveToken(
           formData.tokenAddress,
           networkConfig.chainOathAddress,
-          formData.committerStake.toString()
+          committerStakeInWei
         );
 
         console.log("等待授权交易确认...");
@@ -301,7 +339,7 @@ const CreateOath: React.FC = () => {
       const stakeTx = await contractService.committerStake(
         oathId,
         formData.tokenAddress,
-        formData.committerStake.toString()
+        committerStakeInWei
       );
 
       console.log("等待质押交易确认...");

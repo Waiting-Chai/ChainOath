@@ -139,10 +139,15 @@ contract ChainOath is ReentrancyGuard, Ownable {
         oath.token = IERC20(_token);
         oath.status = OathStatus.Pending;
         
-        // 复制监督者数组
+        // 复制并检查监督者数组
         for (uint i = 0; i < _oath.supervisors.length; i++) {
-            require(_oath.supervisors[i] != address(0), "Invalid supervisor address");
-            oath.supervisors.push(_oath.supervisors[i]);
+            address supervisor = _oath.supervisors[i];
+            require(supervisor != address(0), "Invalid supervisor address");
+            // 检查重复地址
+            for (uint j = i + 1; j < _oath.supervisors.length; j++) {
+                require(_oath.supervisors[j] != supervisor, "Duplicate supervisor address");
+            }
+            oath.supervisors.push(supervisor);
         }
         
         // 创建者质押奖励金额
@@ -497,6 +502,8 @@ contract ChainOath is ReentrancyGuard, Ownable {
     /**
      * 监督者领取奖励
      */
+    mapping(uint256 => uint256) private claimedSupervisorRewards;
+
     function _claimSupervisorReward(uint256 _oathId) internal {
         Oath storage oath = oaths[_oathId];
         require(supervisorStakes[_oathId].hasStaked[msg.sender], "No stake to claim");
@@ -506,17 +513,22 @@ contract ChainOath is ReentrancyGuard, Ownable {
         // 计算监督者奖励
         uint256 totalSupervisorReward = oath.totalReward * oath.supervisorRewardRatio / 100;
         uint16 validSupervisors = 0;
+        uint16 totalSuccessfulChecks = 0;
+
         for (uint i = 0; i < oath.supervisors.length; i++) {
-            if (supervisorStakes[_oathId].hasStaked[oath.supervisors[i]]) {
+            address supervisor = oath.supervisors[i];
+            if (supervisorStakes[_oathId].hasStaked[supervisor] && !supervisorStatuses[_oathId][supervisor].isDisqualified) {
                 validSupervisors++;
+                totalSuccessfulChecks += supervisorStatuses[_oathId][supervisor].successfulChecks;
             }
         }
         
         uint256 supervisorReward = 0;
-        if (validSupervisors > 0 && status.successfulChecks > 0) {
-            uint256 rewardPerCheck = totalSupervisorReward / validSupervisors / oath.checkRoundsCount;
-            supervisorReward = rewardPerCheck * status.successfulChecks;
+        if (totalSuccessfulChecks > 0) {
+            supervisorReward = (totalSupervisorReward * status.successfulChecks) / totalSuccessfulChecks;
         }
+
+        claimedSupervisorRewards[_oathId] += supervisorReward;
         
         // 处理质押金
         uint256 stakeAmount = supervisorStakes[_oathId].amounts[msg.sender];
@@ -546,7 +558,10 @@ contract ChainOath is ReentrancyGuard, Ownable {
         creatorStakes[_oathId].hasStaked[msg.sender] = false;
         
         // 计算剩余金额（包括没收的质押金和未分配的奖励）
+        uint256 totalSupervisorReward = oath.totalReward * oath.supervisorRewardRatio / 100;
         uint256 remainingBalance = oath.token.balanceOf(address(this));
+        uint256 undistributedSupervisorReward = totalSupervisorReward - claimedSupervisorRewards[_oathId];
+        remainingBalance += undistributedSupervisorReward;
         
         if (remainingBalance > 0) {
             require(oath.token.transfer(msg.sender, remainingBalance), "Remaining transfer failed");
