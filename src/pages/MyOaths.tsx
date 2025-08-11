@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import {
   AppBar,
@@ -10,7 +10,7 @@ import {
   Chip,
   Container,
   Divider,
-  Grid,
+
   IconButton,
   LinearProgress,
   Menu,
@@ -18,7 +18,12 @@ import {
   Tab,
   Tabs,
   Toolbar,
-  Typography
+  Typography,
+  Alert,
+  CircularProgress,
+  Avatar,
+  Stack,
+  Tooltip
 } from '@mui/material';
 import {
   Link as LinkIcon,
@@ -26,8 +31,46 @@ import {
   CheckCircle as CheckCircleIcon,
   Cancel as CancelIcon,
   AccessTime as AccessTimeIcon,
-  ArrowForward as ArrowForwardIcon
+  ArrowForward as ArrowForwardIcon,
+  Person as PersonIcon,
+  Visibility as VisibilityIcon,
+  Create as CreateIcon,
+  Gavel as GavelIcon,
+  AccountBalance as AccountBalanceIcon,
+  Schedule as ScheduleIcon,
+  Done as DoneIcon
 } from '@mui/icons-material';
+import { contractService } from '../services/contractService';
+import { getCurrentTestTokens } from '../contracts/config';
+
+// 定义誓约数据类型
+interface OathData {
+  id: string;
+  title: string;
+  description: string;
+  creator: string;
+  committers: string[];
+  supervisors: string[];
+  committerStakeAmount: string;
+  supervisorStakeAmount: string;
+  tokenAddress: string;
+  status: number;
+  startTime: number;
+  endTime: number;
+  createdAt: number;
+  userRole?: 'creator' | 'committer' | 'supervisor';
+  isStaked?: boolean;
+  remainingTime?: number;
+}
+
+// 誓约状态常量
+const OathStatus = {
+  CREATED: 0,
+  ACTIVE: 1,
+  COMPLETED: 2,
+  FAILED: 3,
+  CANCELLED: 4
+} as const;
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -63,9 +106,113 @@ function a11yProps(index: number) {
 }
 
 const MyOaths: React.FC = () => {
-  const [tabValue, setTabValue] = React.useState(0);
-  const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
+  const [tabValue, setTabValue] = useState(0);
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [userAddress, setUserAddress] = useState<string | null>(null);
+  const [oaths, setOaths] = useState<OathData[]>([]);
+  const [tokens, setTokens] = useState<Array<{symbol: string; address: string; name: string}>>([]);
+  
   const open = Boolean(anchorEl);
+
+  useEffect(() => {
+    initializeData();
+  }, []);
+
+  const initializeData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      // 初始化合约服务
+      await contractService.initialize();
+      
+      // 获取用户地址
+      const address = await contractService.getCurrentAddress();
+      if (!address) {
+        // 如果没有连接钱包，尝试连接
+        const connectedAddress = await contractService.connectWallet();
+        setUserAddress(connectedAddress);
+      } else {
+        setUserAddress(address);
+      }
+
+      // 获取代币信息
+      const tokenList = getCurrentTestTokens();
+      const tokenArray = Object.entries(tokenList).map(([symbol, address]) => ({
+        symbol,
+        address,
+        name: symbol
+      }));
+      setTokens(tokenArray);
+
+      // 获取用户相关的所有誓约
+      await loadUserOaths(address || userAddress!);
+    } catch (err) {
+      console.error('初始化数据失败:', err);
+      setError(err instanceof Error ? err.message : '初始化失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadUserOaths = async (address: string) => {
+    try {
+      const [createdOaths, committerOaths, supervisorOaths] = await Promise.all([
+        contractService.getUserCreatedOaths(address),
+        contractService.getUserCommitterOaths(address),
+        contractService.getUserSupervisorOaths(address)
+      ]);
+
+      // 合并所有誓约并标记用户角色
+      const allOaths: OathData[] = [];
+      
+      // 添加创建的誓约
+      createdOaths.forEach(oath => {
+        allOaths.push({ ...oath, userRole: 'creator', createdAt: oath.startTime });
+      });
+
+      // 添加守约人誓约
+      committerOaths.forEach(oath => {
+        const existingIndex = allOaths.findIndex(o => o.id === oath.id);
+        if (existingIndex >= 0) {
+          allOaths[existingIndex].userRole = 'creator'; // 如果既是创建者又是守约人，优先显示创建者
+        } else {
+          allOaths.push({ ...oath, userRole: 'committer', createdAt: oath.startTime });
+        }
+      });
+
+      // 添加监督者誓约
+      supervisorOaths.forEach(oath => {
+        const existingIndex = allOaths.findIndex(o => o.id === oath.id);
+        if (existingIndex >= 0) {
+          // 如果已存在，不改变角色
+        } else {
+          allOaths.push({ ...oath, userRole: 'supervisor', createdAt: oath.startTime });
+        }
+      });
+
+      // 获取每个誓约的详细状态
+      for (const oath of allOaths) {
+        try {
+          const [statusInfo, isStaked] = await Promise.all([
+            contractService.getOathStatus(oath.id),
+            contractService.hasStaked(oath.id, address)
+          ]);
+          oath.isStaked = isStaked;
+          oath.remainingTime = statusInfo.remainingTime;
+        } catch (err) {
+          console.warn(`获取誓约 ${oath.id} 状态失败:`, err);
+        }
+      }
+
+      setOaths(allOaths);
+    } catch (err) {
+      console.error('加载用户誓约失败:', err);
+      throw err;
+    }
+  };
 
   const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
@@ -79,49 +226,203 @@ const MyOaths: React.FC = () => {
     setAnchorEl(null);
   };
 
-  // 模拟誓约数据
-  const oaths = [
-    {
-      id: '1',
-      title: '每天跑步5公里',
-      description: '坚持每天早上跑步5公里，持续30天',
-      status: 'active',
-      progress: 60,
-      deadline: '2023-12-31',
-      stake: '0.1 ETH'
-    },
-    {
-      id: '2',
-      title: '完成项目开发',
-      description: '在截止日期前完成区块链项目的开发和部署',
-      status: 'completed',
-      progress: 100,
-      deadline: '2023-11-15',
-      stake: '0.5 ETH'
-    },
-    {
-      id: '3',
-      title: '学习新技能',
-      description: '每周学习5小时Solidity编程',
-      status: 'failed',
-      progress: 30,
-      deadline: '2023-10-30',
-      stake: '0.2 ETH'
+  const handleConfirmCompletion = async (oathId: string) => {
+    try {
+      setLoading(true);
+      await contractService.confirmOathCompletion(oathId);
+      // 重新加载数据
+      await loadUserOaths(userAddress!);
+      setLoading(false);
+    } catch (err) {
+      console.error('确认完成失败:', err);
+      setError(err instanceof Error ? err.message : '确认完成失败');
+      setLoading(false);
     }
-  ];
+  };
 
-  const getStatusChip = (status: string) => {
+  const getStatusChip = (status: number) => {
     switch (status) {
-      case 'active':
+      case OathStatus.CREATED:
+        return <Chip icon={<ScheduleIcon />} label="待激活" color="warning" size="small" />;
+      case OathStatus.ACTIVE:
         return <Chip icon={<AccessTimeIcon />} label="进行中" color="primary" size="small" />;
-      case 'completed':
+      case OathStatus.COMPLETED:
         return <Chip icon={<CheckCircleIcon />} label="已完成" color="success" size="small" />;
-      case 'failed':
+      case OathStatus.FAILED:
         return <Chip icon={<CancelIcon />} label="已失败" color="error" size="small" />;
+      case OathStatus.CANCELLED:
+        return <Chip icon={<CancelIcon />} label="已取消" color="default" size="small" />;
       default:
         return null;
     }
   };
+
+  const getRoleChip = (role?: string) => {
+    switch (role) {
+      case 'creator':
+        return <Chip icon={<CreateIcon />} label="创建者" color="secondary" size="small" variant="outlined" />;
+      case 'committer':
+        return <Chip icon={<PersonIcon />} label="守约者" color="info" size="small" variant="outlined" />;
+      case 'supervisor':
+        return <Chip icon={<VisibilityIcon />} label="监督者" color="warning" size="small" variant="outlined" />;
+      default:
+        return null;
+    }
+  };
+
+  const getTokenSymbol = (tokenAddress: string) => {
+    const token = tokens.find(t => t.address.toLowerCase() === tokenAddress.toLowerCase());
+    return token ? token.symbol : 'Unknown';
+  };
+
+  const formatTimeRemaining = (remainingTime?: number) => {
+    if (!remainingTime || remainingTime <= 0) return '已结束';
+    
+    const days = Math.floor(remainingTime / (24 * 60 * 60));
+    const hours = Math.floor((remainingTime % (24 * 60 * 60)) / (60 * 60));
+    
+    if (days > 0) {
+      return `${days}天${hours}小时`;
+    }
+    return `${hours}小时`;
+  };
+
+  const filterOathsByTab = (oaths: OathData[], tabIndex: number) => {
+    switch (tabIndex) {
+      case 0: // 全部
+        return oaths;
+      case 1: // 进行中
+        return oaths.filter(oath => oath.status === OathStatus.ACTIVE);
+      case 2: // 已完成
+        return oaths.filter(oath => oath.status === OathStatus.COMPLETED);
+      case 3: // 已失败
+        return oaths.filter(oath => oath.status === OathStatus.FAILED);
+      case 4: // 待激活
+        return oaths.filter(oath => oath.status === OathStatus.CREATED);
+      default:
+        return oaths;
+    }
+  };
+
+  const renderOathCard = (oath: OathData) => (
+     <Box key={oath.id} sx={{ width: { xs: '100%', md: '50%', lg: '33.333%' }, p: 1.5 }}>
+      <Card sx={{ 
+        height: '100%', 
+        display: 'flex', 
+        flexDirection: 'column',
+        borderRadius: 2,
+        boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
+        transition: 'all 0.3s ease',
+        '&:hover': { 
+          boxShadow: '0 8px 24px rgba(0,0,0,0.1)',
+          transform: 'translateY(-4px)'
+        }
+      }}>
+        <CardContent sx={{ flexGrow: 1 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+            <Typography variant="h6" component="h2" sx={{ fontWeight: 'bold', flex: 1 }}>
+              {oath.title}
+            </Typography>
+            <IconButton
+              aria-label="more"
+              onClick={handleMenuClick}
+              size="small"
+            >
+              <MoreVertIcon />
+            </IconButton>
+          </Box>
+          
+          <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
+             {getStatusChip(oath.status)}
+             {getRoleChip(oath.userRole)}
+            {!oath.isStaked && oath.userRole !== 'creator' && (
+              <Chip label="未质押" color="error" size="small" variant="outlined" />
+            )}
+          </Stack>
+          
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            {oath.description}
+          </Typography>
+          
+          {oath.status === OathStatus.ACTIVE && oath.remainingTime && (
+            <Box sx={{ mb: 2 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                <Typography variant="body2" color="text.secondary">
+                  剩余时间
+                </Typography>
+                <Typography variant="body2" color="primary">
+                  {formatTimeRemaining(oath.remainingTime)}
+                </Typography>
+              </Box>
+              <LinearProgress 
+                variant="determinate" 
+                value={Math.max(0, Math.min(100, (oath.remainingTime / (oath.endTime - oath.startTime)) * 100))} 
+                sx={{ height: 6, borderRadius: 3 }} 
+              />
+            </Box>
+          )}
+          
+          <Box sx={{ mt: 2 }}>
+            <Typography variant="body2" color="text.secondary">
+              质押金额: {oath.userRole === 'committer' ? oath.committerStakeAmount : oath.supervisorStakeAmount} {getTokenSymbol(oath.tokenAddress)}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              参与者: {oath.committers.length + oath.supervisors.length} 人
+            </Typography>
+          </Box>
+        </CardContent>
+        
+        <Divider />
+        
+        <CardActions sx={{ p: 2 }}>
+          <Stack direction="row" spacing={1} sx={{ width: '100%' }}>
+            <Button 
+              size="small" 
+              endIcon={<ArrowForwardIcon />}
+              component={RouterLink}
+              to={`/oath/${oath.id}`}
+              variant="outlined"
+            >
+              查看详情
+            </Button>
+            
+            {oath.userRole === 'supervisor' && oath.status === OathStatus.ACTIVE && (
+              <Button 
+                size="small" 
+                endIcon={<DoneIcon />}
+                onClick={() => handleConfirmCompletion(oath.id)}
+                variant="contained"
+                color="success"
+              >
+                确认完成
+              </Button>
+            )}
+            
+            {!oath.isStaked && oath.userRole !== 'creator' && oath.status === OathStatus.CREATED && (
+              <Button 
+                size="small" 
+                endIcon={<AccountBalanceIcon />}
+                component={RouterLink}
+                to={`/stake/${oath.id}`}
+                variant="contained"
+                color="warning"
+              >
+                去质押
+              </Button>
+            )}
+          </Stack>
+        </CardActions>
+      </Card>
+     </Box>
+   );
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
 
   return (
     <Box sx={{ bgcolor: 'background.default', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -179,297 +480,79 @@ const MyOaths: React.FC = () => {
       
       {/* Main Content */}
       <Container component="main" maxWidth="lg" sx={{ mt: 4, mb: 8 }}>
-        <Typography variant="h4" component="h1" sx={{ mb: 4, fontWeight: 'bold' }}>
-          我的誓约
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 4 }}>
+          <Typography variant="h4" component="h1" sx={{ fontWeight: 'bold', mr: 2 }}>
+            我的誓约
+          </Typography>
+          {userAddress && (
+            <Tooltip title={userAddress}>
+              <Chip 
+                avatar={<Avatar sx={{ bgcolor: 'primary.main' }}><PersonIcon /></Avatar>}
+                label={`${userAddress.slice(0, 6)}...${userAddress.slice(-4)}`}
+                variant="outlined"
+              />
+            </Tooltip>
+          )}
+        </Box>
+        
+        {error && (
+          <Alert severity="error" sx={{ mb: 3 }}>
+            {error}
+          </Alert>
+        )}
         
         <Box sx={{ width: '100%' }}>
           <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
             <Tabs value={tabValue} onChange={handleTabChange} aria-label="oath tabs">
-              <Tab label="全部" {...a11yProps(0)} />
-              <Tab label="进行中" {...a11yProps(1)} />
-              <Tab label="已完成" {...a11yProps(2)} />
-              <Tab label="已失败" {...a11yProps(3)} />
+              <Tab label={`全部 (${oaths.length})`} {...a11yProps(0)} />
+              <Tab label={`进行中 (${oaths.filter(o => o.status === OathStatus.ACTIVE).length})`} {...a11yProps(1)} />
+              <Tab label={`已完成 (${oaths.filter(o => o.status === OathStatus.COMPLETED).length})`} {...a11yProps(2)} />
+              <Tab label={`已失败 (${oaths.filter(o => o.status === OathStatus.FAILED).length})`} {...a11yProps(3)} />
+              <Tab label={`待激活 (${oaths.filter(o => o.status === OathStatus.CREATED).length})`} {...a11yProps(4)} />
             </Tabs>
           </Box>
           
-          <TabPanel value={tabValue} index={0}>
-            <Grid container spacing={3}>
-              {oaths.map((oath) => (
-                <Grid size={{xs:12, md:6, lg:4}} key={oath.id}>
-                  <Card sx={{ 
-                    height: '100%', 
-                    display: 'flex', 
-                    flexDirection: 'column',
-                    borderRadius: 2,
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
-                    transition: 'all 0.3s ease',
-                    '&:hover': { 
-                      boxShadow: '0 8px 24px rgba(0,0,0,0.1)',
-                      transform: 'translateY(-4px)'
-                    }
-                  }}>
-                    <CardContent sx={{ flexGrow: 1 }}>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
-                        <Typography variant="h6" component="h2" sx={{ fontWeight: 'bold' }}>
-                          {oath.title}
-                        </Typography>
-                        <IconButton
-                          aria-label="more"
-                          id={`oath-menu-button-${oath.id}`}
-                          aria-controls={open ? `oath-menu-${oath.id}` : undefined}
-                          aria-expanded={open ? 'true' : undefined}
-                          aria-haspopup="true"
-                          onClick={handleMenuClick}
-                          size="small"
-                        >
-                          <MoreVertIcon />
-                        </IconButton>
-                        <Menu
-                          id={`oath-menu-${oath.id}`}
-                          anchorEl={anchorEl}
-                          open={open && anchorEl?.id === `oath-menu-button-${oath.id}`}
-                          onClose={handleMenuClose}
-                          MenuListProps={{
-                            'aria-labelledby': `oath-menu-button-${oath.id}`,
-                          }}
-                        >
-                          <MenuItem onClick={handleMenuClose}>编辑</MenuItem>
-                          <MenuItem onClick={handleMenuClose}>分享</MenuItem>
-                          <MenuItem onClick={handleMenuClose}>删除</MenuItem>
-                        </Menu>
-                      </Box>
-                      
-                      {getStatusChip(oath.status)}
-                      
-                      <Typography variant="body2" color="text.secondary" sx={{ mt: 2, mb: 1 }}>
-                        {oath.description}
-                      </Typography>
-                      
-                      {oath.status === 'active' && (
-                        <Box sx={{ mt: 2 }}>
-                          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                            <Typography variant="body2" color="text.secondary">
-                              进度
-                            </Typography>
-                            <Typography variant="body2" color="primary">
-                              {oath.progress}%
-                            </Typography>
-                          </Box>
-                          <LinearProgress variant="determinate" value={oath.progress} sx={{ height: 6, borderRadius: 3 }} />
-                        </Box>
-                      )}
-                      
-                      <Box sx={{ mt: 2 }}>
-                        <Typography variant="body2" color="text.secondary">
-                          截止日期: {oath.deadline}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          质押金额: {oath.stake}
-                        </Typography>
-                      </Box>
-                    </CardContent>
-                    
-                    <Divider />
-                    
-                    <CardActions>
-                      <Button 
-                        size="small" 
-                        endIcon={<ArrowForwardIcon />}
-                        component={RouterLink}
-                        to={`/oath/${oath.id}`}
-                        sx={{ ml: 'auto' }}
-                      >
-                        查看详情
-                      </Button>
-                    </CardActions>
-                  </Card>
-                </Grid>
-              ))}
-            </Grid>
-          </TabPanel>
-          
-          <TabPanel value={tabValue} index={1}>
-            <Grid container spacing={3}>
-              {oaths.filter(oath => oath.status === 'active').map((oath) => (
-                <Grid size={{xs:12, md:6, lg:4}} key={oath.id}>
-                  <Card sx={{ 
-                    height: '100%', 
-                    display: 'flex', 
-                    flexDirection: 'column',
-                    borderRadius: 2,
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
-                    transition: 'all 0.3s ease',
-                    '&:hover': { 
-                      boxShadow: '0 8px 24px rgba(0,0,0,0.1)',
-                      transform: 'translateY(-4px)'
-                    }
-                  }}>
-                    <CardContent sx={{ flexGrow: 1 }}>
-                      <Typography variant="h6" component="h2" sx={{ fontWeight: 'bold', mb: 2 }}>
-                        {oath.title}
-                      </Typography>
-                      
-                      {getStatusChip(oath.status)}
-                      
-                      <Typography variant="body2" color="text.secondary" sx={{ mt: 2, mb: 1 }}>
-                        {oath.description}
-                      </Typography>
-                      
-                      <Box sx={{ mt: 2 }}>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                          <Typography variant="body2" color="text.secondary">
-                            进度
-                          </Typography>
-                          <Typography variant="body2" color="primary">
-                            {oath.progress}%
-                          </Typography>
-                        </Box>
-                        <LinearProgress variant="determinate" value={oath.progress} sx={{ height: 6, borderRadius: 3 }} />
-                      </Box>
-                      
-                      <Box sx={{ mt: 2 }}>
-                        <Typography variant="body2" color="text.secondary">
-                          截止日期: {oath.deadline}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          质押金额: {oath.stake}
-                        </Typography>
-                      </Box>
-                    </CardContent>
-                    
-                    <Divider />
-                    
-                    <CardActions>
-                      <Button 
-                        size="small" 
-                        endIcon={<ArrowForwardIcon />}
-                        component={RouterLink}
-                        to={`/oath/${oath.id}`}
-                        sx={{ ml: 'auto' }}
-                      >
-                        查看详情
-                      </Button>
-                    </CardActions>
-                  </Card>
-                </Grid>
-              ))}
-            </Grid>
-          </TabPanel>
-          
-          <TabPanel value={tabValue} index={2}>
-            <Grid container spacing={3}>
-              {oaths.filter(oath => oath.status === 'completed').map((oath) => (
-                <Grid size={{xs:12, md:6, lg:4}} key={oath.id}>
-                  <Card sx={{ 
-                    height: '100%', 
-                    display: 'flex', 
-                    flexDirection: 'column',
-                    borderRadius: 2,
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
-                    transition: 'all 0.3s ease',
-                    '&:hover': { 
-                      boxShadow: '0 8px 24px rgba(0,0,0,0.1)',
-                      transform: 'translateY(-4px)'
-                    }
-                  }}>
-                    <CardContent sx={{ flexGrow: 1 }}>
-                      <Typography variant="h6" component="h2" sx={{ fontWeight: 'bold', mb: 2 }}>
-                        {oath.title}
-                      </Typography>
-                      
-                      {getStatusChip(oath.status)}
-                      
-                      <Typography variant="body2" color="text.secondary" sx={{ mt: 2, mb: 1 }}>
-                        {oath.description}
-                      </Typography>
-                      
-                      <Box sx={{ mt: 2 }}>
-                        <Typography variant="body2" color="text.secondary">
-                          截止日期: {oath.deadline}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          质押金额: {oath.stake}
-                        </Typography>
-                      </Box>
-                    </CardContent>
-                    
-                    <Divider />
-                    
-                    <CardActions>
-                      <Button 
-                        size="small" 
-                        endIcon={<ArrowForwardIcon />}
-                        component={RouterLink}
-                        to={`/oath/${oath.id}`}
-                        sx={{ ml: 'auto' }}
-                      >
-                        查看详情
-                      </Button>
-                    </CardActions>
-                  </Card>
-                </Grid>
-              ))}
-            </Grid>
-          </TabPanel>
-          
-          <TabPanel value={tabValue} index={3}>
-            <Grid container spacing={3}>
-              {oaths.filter(oath => oath.status === 'failed').map((oath) => (
-                <Grid size={{xs:12, md:6, lg:4}} key={oath.id}>
-                  <Card sx={{ 
-                    height: '100%', 
-                    display: 'flex', 
-                    flexDirection: 'column',
-                    borderRadius: 2,
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
-                    transition: 'all 0.3s ease',
-                    '&:hover': { 
-                      boxShadow: '0 8px 24px rgba(0,0,0,0.1)',
-                      transform: 'translateY(-4px)'
-                    }
-                  }}>
-                    <CardContent sx={{ flexGrow: 1 }}>
-                      <Typography variant="h6" component="h2" sx={{ fontWeight: 'bold', mb: 2 }}>
-                        {oath.title}
-                      </Typography>
-                      
-                      {getStatusChip(oath.status)}
-                      
-                      <Typography variant="body2" color="text.secondary" sx={{ mt: 2, mb: 1 }}>
-                        {oath.description}
-                      </Typography>
-                      
-                      <Box sx={{ mt: 2 }}>
-                        <Typography variant="body2" color="text.secondary">
-                          截止日期: {oath.deadline}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          质押金额: {oath.stake}
-                        </Typography>
-                      </Box>
-                    </CardContent>
-                    
-                    <Divider />
-                    
-                    <CardActions>
-                      <Button 
-                        size="small" 
-                        endIcon={<ArrowForwardIcon />}
-                        component={RouterLink}
-                        to={`/oath/${oath.id}`}
-                        sx={{ ml: 'auto' }}
-                      >
-                        查看详情
-                      </Button>
-                    </CardActions>
-                  </Card>
-                </Grid>
-              ))}
-            </Grid>
-          </TabPanel>
+          {[0, 1, 2, 3, 4].map(tabIndex => (
+            <TabPanel key={tabIndex} value={tabValue} index={tabIndex}>
+               <Box sx={{ display: 'flex', flexWrap: 'wrap', mx: -1.5 }}>
+                 {filterOathsByTab(oaths, tabIndex).length > 0 ? (
+                   filterOathsByTab(oaths, tabIndex).map(renderOathCard)
+                 ) : (
+                   <Box sx={{ width: '100%', textAlign: 'center', py: 8 }}>
+                     <GavelIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
+                     <Typography variant="h6" color="text.secondary">
+                       暂无相关誓约
+                     </Typography>
+                     <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                       {tabIndex === 0 ? '您还没有参与任何誓约' : '该分类下暂无誓约'}
+                     </Typography>
+                     {tabIndex === 0 && (
+                       <Button 
+                         variant="contained" 
+                         component={RouterLink} 
+                         to="/create" 
+                         sx={{ mt: 2 }}
+                       >
+                         创建第一个誓约
+                       </Button>
+                     )}
+                   </Box>
+                 )}
+               </Box>
+             </TabPanel>
+          ))}
         </Box>
       </Container>
+      
+      {/* Menu */}
+      <Menu
+        anchorEl={anchorEl}
+        open={open}
+        onClose={handleMenuClose}
+      >
+        <MenuItem onClick={handleMenuClose}>分享</MenuItem>
+        <MenuItem onClick={handleMenuClose}>导出</MenuItem>
+      </Menu>
     </Box>
   );
 };

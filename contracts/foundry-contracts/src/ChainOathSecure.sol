@@ -4,13 +4,12 @@ pragma solidity ^0.8.19;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
 
 /**
- * ChainOath 誓约合约
- * 实现基于区块链的誓约系统，支持多角色参与和ERC20代币质押
- * 包含创建者、守约人、监督者角色的完整誓约生命周期管理
+ * ChainOath 安全版誓约合约
  */
-contract ChainOath is ReentrancyGuard, Ownable {
+contract ChainOathSecure is ReentrancyGuard, Ownable, Pausable {
     
     /// 表示誓约当前状态的枚举
     enum OathStatus {
@@ -41,7 +40,7 @@ contract ChainOath is ReentrancyGuard, Ownable {
         uint32 endTime;                  // 誓约结束时间（时间戳，单位为s）
         uint32 createTime;               // 创建时间（时间戳，单位为s）
         address creator;                 // 创建者地址
-        IERC20 token;                    // 使用的ERC20代币
+        IERC20 token;                    // 使用的ERC20代币（统一代币类型）
         OathStatus status;               // 当前状态
     }
     
@@ -55,10 +54,9 @@ contract ChainOath is ReentrancyGuard, Ownable {
         bool isSuccess;                         // 本轮是否成功
     }
     
-    /// 质押信息结构
+    /// 质押信息结构（简化为单一代币）
     struct StakeInfo {
         mapping(address => uint256) amounts;     // 质押金额
-        mapping(address => IERC20) tokens;      // 质押代币类型
         mapping(address => bool) hasStaked;     // 是否已质押
     }
     
@@ -69,6 +67,14 @@ contract ChainOath is ReentrancyGuard, Ownable {
         bool isDisqualified;                   // 是否被取消资格
     }
     
+    /// 奖励分配记录（防止重复计算）
+    struct RewardDistribution {
+        uint256 committerRewardClaimed;         // 守约人已领取奖励
+        uint256 supervisorRewardClaimed;        // 监督者已领取奖励总额
+        uint256 creatorRefundClaimed;           // 创建者已领取退款
+        bool isDistributionCompleted;           // 奖励分配是否完成
+    }
+    
     // 状态变量
     uint256 public nextOathId;
     mapping(uint256 => Oath) public oaths;
@@ -77,8 +83,13 @@ contract ChainOath is ReentrancyGuard, Ownable {
     mapping(uint256 => StakeInfo) internal committerStakes;
     mapping(uint256 => StakeInfo) internal supervisorStakes;
     mapping(uint256 => mapping(address => SupervisorStatus)) public supervisorStatuses;
-    mapping(uint256 => uint16) public currentRounds;
     mapping(uint256 => uint16) public committerFailures;
+    mapping(uint256 => RewardDistribution) public rewardDistributions;
+    
+    // 安全机制
+    mapping(address => bool) public tokenWhitelist;     // 代币白名单
+    uint256 public constant MAX_SUPERVISORS = 20;       // 最大监督者数量
+    uint256 public constant MIN_STAKE_AMOUNT = 1e6;     // 最小质押金额（防止粉尘攻击）
     
     // 事件定义
     event OathCreated(uint256 indexed oathId, address indexed creator, string title);
@@ -89,31 +100,58 @@ contract ChainOath is ReentrancyGuard, Ownable {
     event StakeDeposited(uint256 indexed oathId, address indexed staker, uint256 amount, address token);
     event SupervisionSubmitted(uint256 indexed oathId, uint16 round, address indexed supervisor, bool approval);
     event RewardClaimed(uint256 indexed oathId, address indexed claimer, uint256 amount, address token);
+    event TokenWhitelistUpdated(address indexed token, bool isWhitelisted);
+    event EmergencyWithdraw(uint256 indexed oathId, address indexed token, uint256 amount);
     
     constructor() Ownable(msg.sender) {}
     
     /**
+     * 添加/移除代币白名单
+     */
+    function updateTokenWhitelist(address _token, bool _isWhitelisted) external onlyOwner {
+        require(_token != address(0), "Invalid token address");
+        tokenWhitelist[_token] = _isWhitelisted;
+        emit TokenWhitelistUpdated(_token, _isWhitelisted);
+    }
+    
+    /**
+     * 紧急暂停/恢复合约
+     */
+    function emergencyPause() external onlyOwner {
+        _pause();
+    }
+    
+    function emergencyUnpause() external onlyOwner {
+        _unpause();
+    }
+    
+    /**
      * 创建新的誓约
      * _oath 誓约结构体数据
-     * _token 使用的ERC20代币地址
+     * _token 使用的ERC20代币地址（必须在白名单中）
      */
     function createOath(
         Oath memory _oath,
         address _token
-    ) external nonReentrant {
+    ) external nonReentrant whenNotPaused {
+        require(tokenWhitelist[_token], "Token not whitelisted");
         require(block.timestamp < _oath.startTime, "Start time must be in the future");
         require(_oath.startTime < _oath.endTime, "End time must be after start time");
         require(_oath.committer != address(0), "Invalid committer address");
-        require(_oath.supervisors.length > 0, "At least one supervisor required");
-        require(_oath.totalReward > 0, "Total reward must be greater than 0");
+        require(_oath.committer != msg.sender, "Creator cannot be committer");
+        require(_oath.supervisors.length > 0 && _oath.supervisors.length <= MAX_SUPERVISORS, "Invalid supervisor count");
+        require(_oath.totalReward >= MIN_STAKE_AMOUNT, "Total reward too small");
+        require(_oath.committerStake >= MIN_STAKE_AMOUNT, "Committer stake too small");
+        require(_oath.supervisorStake >= MIN_STAKE_AMOUNT, "Supervisor stake too small");
         require(_oath.supervisorRewardRatio <= 100, "Supervisor reward ratio cannot exceed 100%");
-        require(_oath.checkThresholdPercent <= 100, "Check threshold cannot exceed 100%");
+        require(_oath.checkThresholdPercent <= 100 && _oath.checkThresholdPercent > 0, "Invalid check threshold");
         require(_oath.checkInterval > 0, "Check interval must be greater than 0");
-        require(_oath.checkWindow > 0, "Check window must be greater than 0");
+        require(_oath.checkWindow > 0 && _oath.checkWindow <= _oath.checkInterval, "Invalid check window");
         
         // 计算检查轮次
         uint32 duration = _oath.endTime - _oath.startTime;
         uint16 rounds = uint16((duration + _oath.checkInterval - 1) / _oath.checkInterval);
+        require(rounds > 0, "Invalid duration");
         
         uint256 oathId = nextOathId++;
         
@@ -143,6 +181,9 @@ contract ChainOath is ReentrancyGuard, Ownable {
         for (uint i = 0; i < _oath.supervisors.length; i++) {
             address supervisor = _oath.supervisors[i];
             require(supervisor != address(0), "Invalid supervisor address");
+            require(supervisor != msg.sender, "Creator cannot be supervisor");
+            require(supervisor != _oath.committer, "Committer cannot be supervisor");
+            
             // 检查重复地址
             for (uint j = i + 1; j < _oath.supervisors.length; j++) {
                 require(_oath.supervisors[j] != supervisor, "Duplicate supervisor address");
@@ -150,10 +191,9 @@ contract ChainOath is ReentrancyGuard, Ownable {
             oath.supervisors.push(supervisor);
         }
         
-        // 创建者质押奖励金额
+        // 创建者质押奖励金额（使用统一代币）
         require(oath.token.transferFrom(msg.sender, address(this), _oath.totalReward), "Creator stake transfer failed");
         creatorStakes[oathId].amounts[msg.sender] = _oath.totalReward;
-        creatorStakes[oathId].tokens[msg.sender] = oath.token;
         creatorStakes[oathId].hasStaked[msg.sender] = true;
         
         emit OathCreated(oathId, msg.sender, _oath.title);
@@ -161,12 +201,9 @@ contract ChainOath is ReentrancyGuard, Ownable {
     }
     
     /**
-     * 守约人质押
-     * _oathId 誓约ID
-     * _token 质押代币地址
-     * _amount 质押金额
+     * 守约人质押（使用与誓约相同的代币）
      */
-    function committerStake(uint256 _oathId, address _token, uint256 _amount) external nonReentrant {
+    function committerStake(uint256 _oathId, uint256 _amount) external nonReentrant whenNotPaused {
         Oath storage oath = oaths[_oathId];
         require(oath.creator != address(0), "Oath does not exist");
         require(msg.sender == oath.committer, "Only committer can stake");
@@ -182,25 +219,21 @@ contract ChainOath is ReentrancyGuard, Ownable {
         require(!committerStakes[_oathId].hasStaked[msg.sender], "Already staked");
         require(_amount >= oath.committerStake, "Insufficient stake amount");
         
-        IERC20 token = IERC20(_token);
-        require(token.transferFrom(msg.sender, address(this), _amount), "Stake transfer failed");
+        // 使用统一代币类型
+        require(oath.token.transferFrom(msg.sender, address(this), _amount), "Stake transfer failed");
         
         committerStakes[_oathId].amounts[msg.sender] = _amount;
-        committerStakes[_oathId].tokens[msg.sender] = token;
         committerStakes[_oathId].hasStaked[msg.sender] = true;
         
-        emit StakeDeposited(_oathId, msg.sender, _amount, _token);
+        emit StakeDeposited(_oathId, msg.sender, _amount, address(oath.token));
         
         _checkOathAcceptance(_oathId);
     }
     
     /**
-     * 监督者质押
-     * _oathId 誓约ID
-     * _token 质押代币地址
-     * _amount 质押金额
+     * 监督者质押（使用与誓约相同的代币）
      */
-    function supervisorStake(uint256 _oathId, address _token, uint256 _amount) external nonReentrant {
+    function supervisorStake(uint256 _oathId, uint256 _amount) external nonReentrant whenNotPaused {
         Oath storage oath = oaths[_oathId];
         require(oath.creator != address(0), "Oath does not exist");
         require(_isSupervisor(_oathId, msg.sender), "Not a supervisor");
@@ -209,24 +242,21 @@ contract ChainOath is ReentrancyGuard, Ownable {
         require(!supervisorStakes[_oathId].hasStaked[msg.sender], "Already staked");
         require(_amount >= oath.supervisorStake, "Insufficient stake amount");
         
-        IERC20 token = IERC20(_token);
-        require(token.transferFrom(msg.sender, address(this), _amount), "Stake transfer failed");
+        // 使用统一代币类型
+        require(oath.token.transferFrom(msg.sender, address(this), _amount), "Stake transfer failed");
         
         supervisorStakes[_oathId].amounts[msg.sender] = _amount;
-        supervisorStakes[_oathId].tokens[msg.sender] = token;
         supervisorStakes[_oathId].hasStaked[msg.sender] = true;
         
-        emit StakeDeposited(_oathId, msg.sender, _amount, _token);
+        emit StakeDeposited(_oathId, msg.sender, _amount, address(oath.token));
         
         _checkOathAcceptance(_oathId);
     }
     
     /**
      * 监督者提交检查结果
-     * _oathId 誓约ID
-     * _approval 是否批准（true为守约，false为失约）
      */
-    function submitSupervision(uint256 _oathId, bool _approval) external nonReentrant {
+    function submitSupervision(uint256 _oathId, bool _approval) external nonReentrant whenNotPaused {
         Oath storage oath = oaths[_oathId];
         require(oath.creator != address(0), "Oath does not exist");
         require(_isSupervisor(_oathId, msg.sender), "Not a supervisor");
@@ -244,6 +274,7 @@ contract ChainOath is ReentrancyGuard, Ownable {
         SupervisionRecord storage record = supervisionRecords[_oathId][currentRound];
         require(!record.hasChecked[msg.sender], "Already submitted for this round");
         
+        // 更新状态（防止重入）
         record.hasChecked[msg.sender] = true;
         record.approvals[msg.sender] = _approval;
         record.totalChecked++;
@@ -260,9 +291,8 @@ contract ChainOath is ReentrancyGuard, Ownable {
     
     /**
      * 处理超时的监督轮次
-     * _oathId 誓约ID
      */
-    function processTimeoutRound(uint256 _oathId) external {
+    function processTimeoutRound(uint256 _oathId) external whenNotPaused {
         Oath storage oath = oaths[_oathId];
         require(oath.creator != address(0), "Oath does not exist");
         require(oath.status == OathStatus.Accepted, "Oath is not active");
@@ -295,10 +325,9 @@ contract ChainOath is ReentrancyGuard, Ownable {
     }
     
     /**
-     * 领取奖励
-     * _oathId 誓约ID
+     * 领取奖励（修复版本）
      */
-    function claimReward(uint256 _oathId) external nonReentrant {
+    function claimReward(uint256 _oathId) external nonReentrant whenNotPaused {
         Oath storage oath = oaths[_oathId];
         require(oath.creator != address(0), "Oath does not exist");
         require(oath.status == OathStatus.Fulfilled || oath.status == OathStatus.Broken, "Oath not completed");
@@ -316,7 +345,6 @@ contract ChainOath is ReentrancyGuard, Ownable {
     
     /**
      * 检查并更新誓约状态
-     * _oathId 誓约ID
      */
     function checkOathStatus(uint256 _oathId) external {
         Oath storage oath = oaths[_oathId];
@@ -330,34 +358,45 @@ contract ChainOath is ReentrancyGuard, Ownable {
     
     /**
      * 退回质押金（仅在誓约被废止时）
-     * _oathId 誓约ID
      */
-    function refundStake(uint256 _oathId) external nonReentrant {
+    function refundStake(uint256 _oathId) external nonReentrant whenNotPaused {
         Oath storage oath = oaths[_oathId];
         require(oath.creator != address(0), "Oath does not exist");
         require(oath.status == OathStatus.Aborted, "Oath is not aborted");
         
         if (msg.sender == oath.creator && creatorStakes[_oathId].hasStaked[msg.sender]) {
             uint256 amount = creatorStakes[_oathId].amounts[msg.sender];
-            IERC20 token = creatorStakes[_oathId].tokens[msg.sender];
             creatorStakes[_oathId].hasStaked[msg.sender] = false;
-            require(token.transfer(msg.sender, amount), "Refund transfer failed");
-            emit RewardClaimed(_oathId, msg.sender, amount, address(token));
+            require(oath.token.transfer(msg.sender, amount), "Refund transfer failed");
+            emit RewardClaimed(_oathId, msg.sender, amount, address(oath.token));
         } else if (msg.sender == oath.committer && committerStakes[_oathId].hasStaked[msg.sender]) {
             uint256 amount = committerStakes[_oathId].amounts[msg.sender];
-            IERC20 token = committerStakes[_oathId].tokens[msg.sender];
             committerStakes[_oathId].hasStaked[msg.sender] = false;
-            require(token.transfer(msg.sender, amount), "Refund transfer failed");
-            emit RewardClaimed(_oathId, msg.sender, amount, address(token));
+            require(oath.token.transfer(msg.sender, amount), "Refund transfer failed");
+            emit RewardClaimed(_oathId, msg.sender, amount, address(oath.token));
         } else if (_isSupervisor(_oathId, msg.sender) && supervisorStakes[_oathId].hasStaked[msg.sender]) {
             uint256 amount = supervisorStakes[_oathId].amounts[msg.sender];
-            IERC20 token = supervisorStakes[_oathId].tokens[msg.sender];
             supervisorStakes[_oathId].hasStaked[msg.sender] = false;
-            require(token.transfer(msg.sender, amount), "Refund transfer failed");
-            emit RewardClaimed(_oathId, msg.sender, amount, address(token));
+            require(oath.token.transfer(msg.sender, amount), "Refund transfer failed");
+            emit RewardClaimed(_oathId, msg.sender, amount, address(oath.token));
         } else {
             revert("No stake to refund");
         }
+    }
+    
+    /**
+     * 紧急提取（仅限管理员）
+     */
+    function emergencyWithdraw(uint256 _oathId, uint256 _amount) external onlyOwner {
+        Oath storage oath = oaths[_oathId];
+        require(oath.creator != address(0), "Oath does not exist");
+        require(_amount > 0, "Amount must be greater than 0");
+        
+        uint256 balance = oath.token.balanceOf(address(this));
+        require(balance >= _amount, "Insufficient balance");
+        
+        require(oath.token.transfer(owner(), _amount), "Emergency withdraw failed");
+        emit EmergencyWithdraw(_oathId, address(oath.token), _amount);
     }
     
     // 内部函数
@@ -477,95 +516,108 @@ contract ChainOath is ReentrancyGuard, Ownable {
     }
     
     /**
-     * 守约人领取奖励
+     * 守约人领取奖励（修复版本）
      */
     function _claimCommitterReward(uint256 _oathId) internal {
         Oath storage oath = oaths[_oathId];
+        RewardDistribution storage distribution = rewardDistributions[_oathId];
+        
         require(oath.status == OathStatus.Fulfilled, "Oath not fulfilled");
         require(committerStakes[_oathId].hasStaked[msg.sender], "No stake to claim");
+        require(distribution.committerRewardClaimed == 0, "Reward already claimed");
         
         // 计算守约人奖励
         uint256 committerReward = oath.totalReward * (100 - oath.supervisorRewardRatio) / 100;
         
         // 退还质押金
         uint256 stakeAmount = committerStakes[_oathId].amounts[msg.sender];
-        IERC20 stakeToken = committerStakes[_oathId].tokens[msg.sender];
+        
+        // 更新状态（防止重入）
         committerStakes[_oathId].hasStaked[msg.sender] = false;
+        distribution.committerRewardClaimed = committerReward;
         
         // 转账奖励和质押金
-        require(oath.token.transfer(msg.sender, committerReward), "Reward transfer failed");
-        require(stakeToken.transfer(msg.sender, stakeAmount), "Stake refund failed");
+        require(oath.token.transfer(msg.sender, committerReward + stakeAmount), "Transfer failed");
         
         emit RewardClaimed(_oathId, msg.sender, committerReward + stakeAmount, address(oath.token));
     }
     
     /**
-     * 监督者领取奖励
+     * 监督者领取奖励（修复版本 - 修复奖励计算逻辑）
      */
-    mapping(uint256 => uint256) private claimedSupervisorRewards;
-
     function _claimSupervisorReward(uint256 _oathId) internal {
         Oath storage oath = oaths[_oathId];
+        RewardDistribution storage distribution = rewardDistributions[_oathId];
+        
         require(supervisorStakes[_oathId].hasStaked[msg.sender], "No stake to claim");
         
         SupervisorStatus storage status = supervisorStatuses[_oathId][msg.sender];
         
-        // 计算监督者奖励
+        // 计算监督者奖励 - 使用固定的平均分配避免重复计算问题
         uint256 totalSupervisorReward = oath.totalReward * oath.supervisorRewardRatio / 100;
         uint16 validSupervisors = 0;
         uint16 totalSuccessfulChecks = 0;
 
+        // 计算所有监督者的总成功检查次数（包括已领取的）
         for (uint i = 0; i < oath.supervisors.length; i++) {
             address supervisor = oath.supervisors[i];
-            if (supervisorStakes[_oathId].hasStaked[supervisor] && !supervisorStatuses[_oathId][supervisor].isDisqualified) {
+            if (!supervisorStatuses[_oathId][supervisor].isDisqualified) {
                 validSupervisors++;
                 totalSuccessfulChecks += supervisorStatuses[_oathId][supervisor].successfulChecks;
             }
         }
         
         uint256 supervisorReward = 0;
-        if (totalSuccessfulChecks > 0) {
-            supervisorReward = (totalSupervisorReward * status.successfulChecks) / totalSuccessfulChecks;
+        if (totalSuccessfulChecks > 0 && validSupervisors > 0) {
+            // 使用简化的平均分配，避免精度问题
+            supervisorReward = totalSupervisorReward / validSupervisors;
         }
-
-        claimedSupervisorRewards[_oathId] += supervisorReward;
         
         // 处理质押金
         uint256 stakeAmount = supervisorStakes[_oathId].amounts[msg.sender];
-        IERC20 stakeToken = supervisorStakes[_oathId].tokens[msg.sender];
+        
+        // 更新状态（防止重入）
         supervisorStakes[_oathId].hasStaked[msg.sender] = false;
+        distribution.supervisorRewardClaimed += supervisorReward;
+        
+        uint256 totalTransfer = supervisorReward;
         
         // 如果未被取消资格，退还质押金
         if (!status.isDisqualified) {
-            require(stakeToken.transfer(msg.sender, stakeAmount), "Stake refund failed");
+            totalTransfer += stakeAmount;
         }
         
-        // 转账奖励
-        if (supervisorReward > 0) {
-            require(oath.token.transfer(msg.sender, supervisorReward), "Reward transfer failed");
+        // 转账奖励和质押金
+        if (totalTransfer > 0) {
+            require(oath.token.transfer(msg.sender, totalTransfer), "Transfer failed");
         }
         
-        emit RewardClaimed(_oathId, msg.sender, supervisorReward + (status.isDisqualified ? 0 : stakeAmount), address(oath.token));
+        emit RewardClaimed(_oathId, msg.sender, totalTransfer, address(oath.token));
     }
     
     /**
-     * 创建者领取剩余资金
+     * 创建者领取剩余资金（修复版本 - 解决重复计算问题）
      */
     function _claimCreatorReward(uint256 _oathId) internal {
         Oath storage oath = oaths[_oathId];
+        RewardDistribution storage distribution = rewardDistributions[_oathId];
+        
         require(creatorStakes[_oathId].hasStaked[msg.sender], "No stake to claim");
+        require(distribution.creatorRefundClaimed == 0, "Already claimed");
         
+        // 更新状态（防止重入）
         creatorStakes[_oathId].hasStaked[msg.sender] = false;
+        distribution.isDistributionCompleted = true;
         
-        // 计算剩余金额（包括没收的质押金和未分配的奖励）
-        uint256 totalSupervisorReward = oath.totalReward * oath.supervisorRewardRatio / 100;
-        uint256 remainingBalance = oath.token.balanceOf(address(this));
-        uint256 undistributedSupervisorReward = totalSupervisorReward - claimedSupervisorRewards[_oathId];
-        remainingBalance += undistributedSupervisorReward;
+        // 计算实际合约余额（修复重复计算问题）
+        uint256 contractBalance = oath.token.balanceOf(address(this));
         
-        if (remainingBalance > 0) {
-            require(oath.token.transfer(msg.sender, remainingBalance), "Remaining transfer failed");
-            emit RewardClaimed(_oathId, msg.sender, remainingBalance, address(oath.token));
+        // 记录已分配金额
+        distribution.creatorRefundClaimed = contractBalance;
+        
+        if (contractBalance > 0) {
+            require(oath.token.transfer(msg.sender, contractBalance), "Transfer failed");
+            emit RewardClaimed(_oathId, msg.sender, contractBalance, address(oath.token));
         }
     }
     
@@ -623,5 +675,30 @@ contract ChainOath is ReentrancyGuard, Ownable {
             return supervisorStakes[_oathId].hasStaked[_addr];
         }
         return false;
+    }
+    
+    /**
+     * 获取奖励分配信息
+     */
+    function getRewardDistribution(uint256 _oathId) external view returns (
+        uint256 committerRewardClaimed,
+        uint256 supervisorRewardClaimed,
+        uint256 creatorRefundClaimed,
+        bool isDistributionCompleted
+    ) {
+        RewardDistribution storage distribution = rewardDistributions[_oathId];
+        return (
+            distribution.committerRewardClaimed,
+            distribution.supervisorRewardClaimed,
+            distribution.creatorRefundClaimed,
+            distribution.isDistributionCompleted
+        );
+    }
+    
+    /**
+     * 获取合约中特定代币的余额
+     */
+    function getContractTokenBalance(address _token) external view returns (uint256) {
+        return IERC20(_token).balanceOf(address(this));
     }
 }

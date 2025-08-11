@@ -53,7 +53,7 @@ const Home: React.FC = () => {
     // 检测 MetaMask 注入
     if (!window.ethereum) {
       setWarningMessage(withoutMateMask);
-       throw new Error("请先安装 MetaMask");
+      throw new Error("请先安装 MetaMask");
     }
     // v6 里叫 BrowserProvider
     const provider = new ethers.BrowserProvider(window.ethereum);

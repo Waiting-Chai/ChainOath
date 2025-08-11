@@ -52,17 +52,152 @@ ChainOath/
 
 ---
 
-# 🧭 一、项目愿景与核心理念
+# 🛠️ 二、技术栈与开发环境
 
-在数字时代，信任的建立往往依赖于中心化的第三方机构。ChainOath 旨在打破这一模式，通过区块链技术，将“承诺”这一社会行为赋予密码学保障。我们相信，当承诺的履行过程变得透明、自动且不可干预时，人与人之间的协作将达到新的高度。
+### 🎯 核心技术栈
+- **前端框架**：React 18 + TypeScript + Vite
+- **UI 组件库**：Material-UI (MUI) v6
+- **区块链交互**：ethers.js v6
+- **智能合约**：Solidity + Foundry
+- **去中心化存储**：IPFS (用于存储誓约详情)
+- **去中心化消息**：XMTP (用于参与者间通信)
+- **网络支持**：Ethereum Mainnet / Sepolia Testnet
 
-- **去中心化信任**：代码即法律，智能合约是唯一的中介。
-- **用户主权**：用户通过钱包完全掌控自己的数据和资产。
-- **透明与公平**：所有规则和执行过程都在链上公开，对所有参与者一视同仁。
+### 🔧 开发工具链
+- **构建工具**：Vite 7.0.6 (快速热重载)
+- **代码规范**：ESLint + TypeScript 严格模式
+- **路由管理**：React Router v6
+- **状态管理**：React Hooks (useState, useEffect)
+- **样式方案**：Material-UI 主题系统 + CSS-in-JS
+- **数值处理**：BigNumber.js (精确的大数运算)
+
+### 🎨 UI/UX 设计原则
+- **设计语言**：现代化扁平设计，靛蓝色主色调 (#4F46E5)
+- **响应式布局**：移动端优先，支持多设备适配
+- **交互反馈**：丰富的动画效果和状态提示
+- **可访问性**：遵循 WCAG 2.1 标准
+
+### 🚀 快速开始
+
+#### 环境要求
+- Node.js >= 18.0.0
+- npm >= 8.0.0
+- MetaMask 或其他 Web3 钱包
+
+#### 网络配置
+
+项目支持多网络部署，通过环境变量进行配置：
+
+1. **复制环境变量模板**
+```bash
+cp .env.example .env
+```
+
+2. **配置网络参数**
+```bash
+# 设置当前使用的网络
+VITE_NETWORK=sepolia  # 可选: mainnet, sepolia, localhost
+
+# Sepolia 测试网配置
+VITE_SEPOLIA_RPC_URL=https://sepolia.infura.io/v3/YOUR_INFURA_KEY
+VITE_SEPOLIA_CONTRACT_ADDRESS=YOUR_DEPLOYED_CONTRACT_ADDRESS
+```
+
+3. **网络说明**
+- **Sepolia**: 推荐的以太坊测试网络，稳定且接近主网环境
+- **Mainnet**: 以太坊主网，用于生产环境
+- **Localhost**: 本地开发网络（如 Hardhat/Ganache）
+
+#### 本地开发
+```bash
+# 克隆项目
+git clone https://github.com/your-username/ChainOath.git
+cd ChainOath
+
+# 安装依赖
+npm install
+
+# 配置环境变量
+cp .env.example .env
+# 编辑 .env 文件，设置正确的网络和合约地址
+
+# 启动开发服务器
+npm run dev
+
+# 访问应用
+# 浏览器打开 http://localhost:5173
+```
+
+#### 项目结构
+```
+ChainOath/
+├── src/
+│   ├── pages/           # 页面组件
+│   ├── services/        # 业务逻辑服务
+│   ├── contracts/       # 智能合约配置
+│   ├── theme.ts         # UI主题配置
+│   └── App.tsx          # 应用入口
+├── contracts/           # 智能合约源码
+├── scripts/            # 部署脚本
+└── README.md           # 项目文档
+```
+
+### 合约部署指南
+
+#### 部署到 Sepolia 测试网
+
+1. **准备工作**
+   - 获取 Sepolia 测试网 ETH（通过水龙头）
+   - 配置 Infura 或 Alchemy RPC 节点
+   - 准备部署钱包私钥
+
+2. **部署步骤**
+```bash
+# 安装 Hardhat（如果使用 Hardhat）
+npm install --save-dev hardhat
+
+# 配置网络参数
+# 在 hardhat.config.js 中添加 Sepolia 网络配置
+
+# 部署合约
+npx hardhat run scripts/deploy.js --network sepolia
+```
+
+3. **更新配置**
+```bash
+# 将部署后的合约地址更新到 .env 文件
+VITE_SEPOLIA_CONTRACT_ADDRESS=0x你的合约地址
+```
+
+#### 网络切换
+
+项目会自动验证当前 MetaMask 网络是否与配置匹配：
+- 如果网络不匹配，会提示用户切换到正确的网络
+- 支持的网络：Mainnet (1)、Sepolia (11155111)、Localhost (31337)
+
+#### 合约验证
+
+部署后建议在区块链浏览器上验证合约：
+```bash
+# Sepolia 网络验证
+npx hardhat verify --network sepolia DEPLOYED_CONTRACT_ADDRESS
+```
 
 ---
 
-# 🧱 二、技术架构与核心组件
+# 🧭 三、项目愿景与核心理念
+
+在数字时代，信任的建立往往依赖于中心化的第三方机构。ChainOath 旨在打破这一模式，通过区块链技术，将"承诺"这一社会行为赋予密码学保障。我们相信，当承诺的履行过程变得透明、自动且不可干预时，人与人之间的协作可以达到新的高度。
+
+- **去中心化信任**：代码即法律，智能合约是唯一的中介
+- **用户主权**：用户通过钱包完全掌控自己的数据和资产
+- **透明与公平**：所有规则和执行过程都在链上公开，对所有参与者一视同仁
+- **多角色协作**：创建者、守约人、监督者三方制衡，确保誓约执行的公正性
+- **经济激励**：通过质押和奖励机制，激励各方诚实履约
+
+---
+
+# 🧱 四、技术架构与核心组件
 
 ChainOath 采用纯 DApp 架构，前端直接与区块链和去中心化存储交互，无任何中心化后端服务器。这保证了平台的抗审查性和高可用性。
 
@@ -82,9 +217,52 @@ ChainOath 采用纯 DApp 架构，前端直接与区块链和去中心化存储�
 
 ---
 
-## 📋 三、页面结构与核心功能
+## 📋 五、页面结构与核心功能
 
-应用的核心用户旅程围绕着“创建”、“签署”、“履行”和“验证”四个环节展开。
+### 🏗️ 前端架构设计
+
+ChainOath 采用现代化的 React 架构，具有清晰的分层设计：
+
+```
+src/
+├── pages/              # 页面组件层
+│   ├── Home.tsx         # 首页 - 产品介绍与导航
+│   ├── CreateOath.tsx   # 创建誓约 - 多步骤表单
+│   ├── MyOaths.tsx      # 我的誓约 - 列表管理
+│   ├── OathDetail.tsx   # 誓约详情 - 状态展示
+│   └── StakeParticipation.tsx # 质押参与页面
+├── services/           # 服务层
+│   ├── contractService.ts    # 智能合约交互服务
+│   └── notificationService.ts # XMTP消息通知服务
+├── contracts/          # 合约配置层
+│   ├── ChainOathABI.ts      # 合约ABI定义
+│   └── config.ts            # 网络配置与代币列表
+└── theme.ts           # Material-UI主题配置
+```
+
+### 🔧 核心服务层设计
+
+#### ContractService - 智能合约交互服务
+- **职责**：封装所有与智能合约的交互逻辑
+- **核心方法**：
+  - `createOath()` - 创建新誓约
+  - `committerStake()` - 守约人质押
+  - `supervisorStake()` - 监督者质押
+  - `confirmOathCompletion()` - 监督者确认完成
+  - `getOathInfo()` - 获取誓约详情
+  - `setupEventListeners()` - 设置合约事件监听
+
+#### NotificationService - 去中心化消息服务
+- **技术选型**：基于 XMTP 协议的去中心化消息传递
+- **核心功能**：
+  - `sendOathCreatedNotification()` - 誓约创建通知
+  - `sendStakeReminderNotification()` - 质押提醒
+  - `sendOathActivatedNotification()` - 誓约激活通知
+  - `sendStakeSuccessNotification()` - 质押成功通知
+
+### 📱 页面组件详细设计
+
+应用的核心用户旅程围绕着"创建"、"质押"、"监督"和"结算"四个环节展开。
 
 ### 1️⃣ **首页 (`/`) - 发现与入口**
 
@@ -138,7 +316,7 @@ ChainOath 采用纯 DApp 架构，前端直接与区块链和去中心化存储�
 
 ---
 
-# ⛓️ 四、智能合约设计（核心逻辑）
+# ⛓️ 六、智能合约设计（核心逻辑）
 
 ## 🧬 ChainOath 智能合约规则文档
 
@@ -386,7 +564,7 @@ function getSupervisorStatus(uint256 _oathId, address _supervisor) external view
 
 ---
 
-# 🧪 五、开发、测试与部署流程
+# 🧪 七、开发、测试与部署流程
 
 我们遵循专业的软件开发生命周期，确保代码质量和应用稳定性。
 
@@ -475,7 +653,7 @@ npm run preview
 
 ---
 
-# ✅ 六、未来可拓展方向
+# ✅ 八、未来可拓展方向
 
 - **社交功能**：允许用户评论、点赞或“见证”他人的誓约。
 - **模板市场**：用户可以创建和分享常用的誓约模板。

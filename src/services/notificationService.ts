@@ -225,6 +225,45 @@ export class NotificationService {
   }
 
   /**
+   * 发送质押成功通知
+   */
+  async sendStakeSuccessNotification(oathId: string, title: string, recipients: string[], stakeType: 'committer' | 'supervisor'): Promise<void> {
+    const roleText = stakeType === 'committer' ? '守约者' : '监督者';
+    console.log(`发送${roleText}质押成功通知: ${title} (ID: ${oathId}) 给 ${recipients.length} 个接收者`);
+    
+    if (!this.isInitialized) {
+      console.warn('XMTP客户端未初始化，尝试初始化...');
+      const initialized = await this.initializeXMTP();
+      if (!initialized) {
+        console.error('无法初始化XMTP客户端，跳过消息发送');
+        return;
+      }
+    }
+
+    const message = `🎉 ChainOath 质押成功\n\n恭喜！您已成功完成质押！\n\n📋 誓约标题: ${title}\n🆔 誓约ID: ${oathId}\n👤 您的角色: ${roleText}\n\n质押已确认，誓约即将生效。\n\n⏰ 质押时间: ${new Date().toLocaleString()}`;
+
+    // 使用XMTP发送消息
+    const results = await this.sendBatchXMTPMessages(recipients, message);
+    
+    console.log(`${roleText}质押成功通知发送完成: 成功 ${results.success.length} 个，失败 ${results.failed.length} 个`);
+    if (results.failed.length > 0) {
+      console.warn('发送失败的地址:', results.failed);
+    }
+
+    // 存储通知记录
+    this.saveNotificationRecord({
+      type: 'stake_success',
+      oathId,
+      title,
+      recipients,
+      stakeType,
+      successCount: results.success.length,
+      failedCount: results.failed.length,
+      timestamp: Date.now()
+    });
+  }
+
+  /**
    * 获取XMTP客户端状态
    */
   getClientStatus(): { isInitialized: boolean; address: string | null } {
@@ -294,6 +333,43 @@ export class NotificationService {
       console.log('通知记录已清除');
     } catch (error) {
       console.error('清除通知记录失败:', error);
+    }
+  }
+
+  /**
+   * 发送带链接的质押提醒通知
+   */
+  async sendStakeReminderWithLink(
+    oathId: string,
+    oathTitle: string,
+    recipientAddresses: string[],
+    role: 'committer' | 'supervisor'
+  ): Promise<void> {
+    try {
+      const roleText = role === 'committer' ? '守约者' : '监督者';
+      const stakeUrl = `${window.location.origin}/stake/${oathId}`;
+      const message = `📋 誓约质押提醒\n\n您被邀请作为${roleText}参与誓约：${oathTitle}\n誓约ID：${oathId}\n\n请点击以下链接进行质押：\n${stakeUrl}\n\n请及时完成质押以激活誓约。`;
+      
+      const results = await this.sendBatchXMTPMessages(recipientAddresses, message);
+      
+      console.log(`${roleText}质押提醒发送完成: 成功 ${results.success.length} 个，失败 ${results.failed.length} 个`);
+      if (results.failed.length > 0) {
+        console.warn('发送失败的地址:', results.failed);
+      }
+      
+      // 保存通知记录
+      this.saveNotificationRecord({
+        type: 'stake_reminder_with_link',
+        oathId,
+        title: oathTitle,
+        recipients: recipientAddresses,
+        stakeType: role,
+        successCount: results.success.length,
+        failedCount: results.failed.length,
+        timestamp: Date.now()
+      });
+    } catch (error) {
+      console.error('发送质押提醒通知失败:', error);
     }
   }
 }

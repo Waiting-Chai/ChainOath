@@ -3,13 +3,13 @@ const fs = require('fs');
 const path = require('path');
 
 /**
- * 部署ChainOath合约的脚本
+ * 部署ChainOathSecure合约的脚本（安全版本）
  * 使用方法：node scripts/deploy.js
  */
 
 async function main() {
   try {
-    console.log('开始部署ChainOath合约...');
+    console.log('开始部署ChainOathSecure合约（安全版本）...');
     
     // 检查是否有MetaMask或其他钱包
     if (typeof window !== 'undefined' && window.ethereum) {
@@ -18,7 +18,7 @@ async function main() {
     }
     
     // 读取合约ABI和字节码
-    const contractsDir = path.join(__dirname, '../contracts/foundry-contracts/out/ChainOath.sol');
+    const contractsDir = path.join(__dirname, '../contracts/foundry-contracts/out/ChainOathSecure.sol');
     
     if (!fs.existsSync(contractsDir)) {
       console.error('未找到合约编译文件，请先编译合约：');
@@ -27,7 +27,7 @@ async function main() {
     }
     
     const contractJson = JSON.parse(
-      fs.readFileSync(path.join(contractsDir, 'ChainOath.json'), 'utf8')
+      fs.readFileSync(path.join(contractsDir, 'ChainOathSecure.json'), 'utf8')
     );
     
     const abi = contractJson.abi;
@@ -68,7 +68,7 @@ async function main() {
     await contract.waitForDeployment();
     
     const contractAddress = await contract.getAddress();
-    console.log('✅ChainOath合约部署成功！');
+    console.log('✅ChainOathSecure合约部署成功！');
     console.log('合约地址:', contractAddress);
     
     // 更新配置文件
@@ -127,7 +127,7 @@ window.deployContract = async function() {
     // 这里需要手动提供ABI和字节码
     // 由于无法在浏览器中读取文件，需要手动复制
     console.log('请手动提供合约ABI和字节码');
-    console.log('可以从 contracts/foundry-contracts/out/ChainOath.sol/ChainOath.json 文件中获取');
+    console.log('可以从 contracts/foundry-contracts/out/ChainOathSecure.sol/ChainOathSecure.json 文件中获取');
     
     return deployerAddress;
     

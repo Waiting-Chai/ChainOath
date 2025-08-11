@@ -3,7 +3,7 @@ import { Link as RouterLink, useNavigate } from "react-router-dom";
 import BigNumber from "bignumber.js";
 import { contractService } from "../services/contractService";
 import { notificationService } from "../services/notificationService";
-import { getCurrentNetworkConfig } from "../contracts/config";
+import { getCurrentNetworkConfig, getCurrentTestTokens } from "../contracts/config";
 import {
   AppBar,
   Box,
@@ -39,9 +39,9 @@ interface OathFormData {
   description: string;
   committer: string;
   supervisors: string[];
-  totalReward: number;
-  committerStake: number;
-  supervisorStake: number;
+  totalReward: number | string;
+  committerStake: number | string;
+  supervisorStake: number | string;
   supervisorRewardRatio: number;
   checkInterval: number;
   checkIntervalUnit: string;
@@ -54,24 +54,6 @@ interface OathFormData {
   endTime: string;
   tokenAddress: string;
 }
-
-// 辅助函数：将时间和单位转换为秒
-const convertToSeconds = (value: number, unit: string): number => {
-  switch (unit) {
-    case "seconds":
-      return value;
-    case "minutes":
-      return value * 60;
-    case "hours":
-      return value * 3600;
-    case "days":
-      return value * 86400;
-    case "weeks":
-      return value * 604800;
-    default:
-      return value; // 默认为秒
-  }
-};
 
 const CreateOath: React.FC = () => {
   const navigator = useNavigate();
@@ -194,9 +176,14 @@ const CreateOath: React.FC = () => {
 
   // 提交表单
   const handleSubmit = async () => {
-    // 数据验证
-    if (!formData.title || !formData.description) {
-      alert("请填写誓约标题和描述");
+    // 验证表单数据
+    if (!formData.title || formData.title.length < 5) {
+      alert("誓约标题至少需要5个字符");
+      return;
+    }
+
+    if (!formData.description || formData.description.length < 20) {
+      alert("誓约描述至少需要20个字符");
       return;
     }
 
@@ -209,19 +196,29 @@ const CreateOath: React.FC = () => {
       return;
     }
 
-    if (
-      formData.supervisors.some(
-        (addr) => !addr || addr.length !== 42 || !addr.startsWith("0x")
-      )
-    ) {
-      alert("请输入有效的监督者地址");
-      return;
+    // 验证监督者地址
+    for (const supervisor of formData.supervisors) {
+      if (
+        !supervisor ||
+        supervisor.length !== 42 ||
+        !supervisor.startsWith("0x")
+      ) {
+        alert("请输入有效的监督者地址");
+        return;
+      }
     }
 
+    // 检查监督者地址是否重复
     const uniqueSupervisors = new Set(formData.supervisors.map(addr => addr.toLowerCase()));
     if (uniqueSupervisors.size !== formData.supervisors.length) {
         alert("监督者地址不能重复");
         return;
+    }
+
+    // 新增：守约人地址不能与任何监督者重复
+    if (formData.supervisors.some(addr => addr.toLowerCase() === formData.committer.toLowerCase())) {
+      alert("守约人地址不能与监督者地址相同");
+      return;
     }
 
     if (
@@ -251,34 +248,6 @@ const CreateOath: React.FC = () => {
       return;
     }
 
-    // 使用 BigNumber.js 处理金额，并转换为合约需要的格式 (wei)
-    const committerStakeInWei = new BigNumber(formData.committerStake)
-      .shiftedBy(18)
-      .toString();
-    const supervisorStakeInWei = new BigNumber(formData.supervisorStake)
-      .shiftedBy(18)
-      .toString();
-
-    // 构造合约调用数据
-    const oathData = {
-      title: formData.title,
-      description: formData.description,
-      committers: [formData.committer], // 转换为数组
-      supervisors: formData.supervisors.filter((addr) => addr.trim() !== ""),
-      committerStakeAmount: committerStakeInWei,
-      supervisorStakeAmount: supervisorStakeInWei,
-      duration: Math.floor((endTimestamp - startTimestamp) / 86400), // 转换为天数
-      penaltyRate: formData.supervisorRewardRatio, // 使用监督者奖励比例作为惩罚率
-      checkInterval: convertToSeconds(formData.checkInterval, formData.checkIntervalUnit),
-      checkWindow: convertToSeconds(formData.checkWindow, formData.checkWindowUnit),
-      checkThresholdPercent: formData.checkThresholdPercent,
-      maxSupervisorMisses: formData.maxSupervisorMisses,
-      maxCommitterFailures: formData.maxCommitterFailures,
-    };
-
-    console.log("提交的誓约数据:", oathData);
-    console.log("代币地址:", formData.tokenAddress);
-
     try {
       setIsSubmitting(true);
 
@@ -289,20 +258,55 @@ const CreateOath: React.FC = () => {
       const userAddress = await contractService.connectWallet();
       console.log("钱包连接成功:", userAddress);
 
-      // 3. 检查代币余额
+      // 3. 获取代币信息（若需限制输入小数位可用 tokenInfo.decimals）
+      const tokenInfo = await contractService.getTokenInfo(formData.tokenAddress);
+
+      // 基于代币精度进行质押金额的小数位校验与合法性校验
+      const committerStakeValue = typeof formData.committerStake === 'string' 
+        ? formData.committerStake.trim() 
+        : formData.committerStake.toString();
+      if (!committerStakeValue || Number(committerStakeValue) <= 0) {
+        alert("守约人质押金额需大于0");
+        return;
+      }
+      const decimalPart = committerStakeValue.split('.')[1];
+      if (decimalPart && decimalPart.length > tokenInfo.decimals) {
+        alert(`代币最多支持 ${tokenInfo.decimals} 位小数，请调整质押金额`);
+        return;
+      }
+
+      // 4. 构造合约调用数据（不需要shiftedBy转换，createOath方法接收原始字符串）
+      const oathData = {
+        title: formData.title,
+        description: formData.description,
+        committers: [formData.committer], // 转换为数组
+        supervisors: formData.supervisors.filter((addr) => addr.trim() !== ""),
+        committerStakeAmount: committerStakeValue,
+        supervisorStakeAmount: typeof formData.supervisorStake === 'string' 
+          ? formData.supervisorStake 
+          : formData.supervisorStake.toString(),
+        duration: Math.floor((endTimestamp - startTimestamp) / 86400), // 转换为天数
+        penaltyRate: formData.supervisorRewardRatio, // 使用监督者奖励比例作为惩罚率
+      };
+
+      console.log("提交的誓约数据:", oathData);
+      console.log("代币地址:", formData.tokenAddress);
+
+      // 5. 检查代币余额
       const balance = await contractService.getTokenBalance(
         formData.tokenAddress,
         userAddress
       );
       console.log("代币余额:", balance);
 
-      if (new BigNumber(balance).isLessThan(formData.committerStake)) {
+      // 移除重复定义：committerStakeValue 已在上方定义
+      if (new BigNumber(balance).isLessThan(committerStakeValue)) {
         throw new Error(
-          `代币余额不足，需要 ${formData.committerStake}，当前余额 ${balance}`
+          `代币余额不足，需要 ${committerStakeValue}，当前余额 ${balance}`
         );
       }
 
-      // 4. 检查并授权代币
+      // 6. 检查并授权代币
       const networkConfig = getCurrentNetworkConfig();
       const allowance = await contractService.getTokenAllowance(
         formData.tokenAddress,
@@ -310,12 +314,12 @@ const CreateOath: React.FC = () => {
         networkConfig.chainOathAddress
       );
 
-      if (new BigNumber(allowance).isLessThan(formData.committerStake)) {
+      if (new BigNumber(allowance).isLessThan(committerStakeValue)) {
         console.log("需要授权代币...");
         const approveTx = await contractService.approveToken(
           formData.tokenAddress,
           networkConfig.chainOathAddress,
-          committerStakeInWei
+          committerStakeValue  // 传递用户输入的金额，不是wei
         );
 
         console.log("等待授权交易确认...");
@@ -323,7 +327,7 @@ const CreateOath: React.FC = () => {
         console.log("代币授权成功");
       }
 
-      // 5. 创建誓约
+      // 7. 创建誓约
       console.log("创建誓约中...");
       const { tx, oathId } = await contractService.createOath(
         oathData,
@@ -334,19 +338,18 @@ const CreateOath: React.FC = () => {
       await tx.wait();
       console.log("誓约创建成功，ID:", oathId);
 
-      // 6. 创建者进行质押
+      // 8. 创建者进行质押
       console.log("创建者质押中...");
       const stakeTx = await contractService.committerStake(
         oathId,
-        formData.tokenAddress,
-        committerStakeInWei
+        committerStakeValue  // 传递用户输入的金额，不是wei
       );
 
       console.log("等待质押交易确认...");
       await stakeTx.wait();
       console.log("创建者质押成功");
 
-      // 7. 发送通知给所有参与者
+      // 9. 发送通知给所有参与者
       const allParticipants = [
         formData.committer,
         ...formData.supervisors,
@@ -361,7 +364,7 @@ const CreateOath: React.FC = () => {
 
       // 发送质押提醒给守约者（如果不是创建者）
       if (formData.committer !== userAddress) {
-        await notificationService.sendStakeReminderNotification(
+        await notificationService.sendStakeReminderWithLink(
           oathId,
           formData.title,
           [formData.committer],
@@ -370,14 +373,14 @@ const CreateOath: React.FC = () => {
       }
 
       // 发送质押提醒给监督者
-      await notificationService.sendStakeReminderNotification(
+      await notificationService.sendStakeReminderWithLink(
         oathId,
         formData.title,
         formData.supervisors,
         "supervisor"
       );
 
-      // 9. 设置合约事件监听
+      // 10. 设置合约事件监听
       contractService.setupEventListeners({
         onOathCreated: (oathId: string, creator: string, title: string) => {
           console.log("监听到誓约创建事件:", { oathId, creator, title });
@@ -576,19 +579,23 @@ const CreateOath: React.FC = () => {
                 />
               </HelpTooltip>
 
-              <HelpTooltip title="指定用于奖励分配和质押的ERC20代币合约地址，确保地址正确有效">
-                <TextField
-                  fullWidth
-                  label="代币合约地址"
-                  placeholder="ERC20代币合约地址"
-                  variant="outlined"
-                  margin="normal"
-                  required
-                  value={formData.tokenAddress}
-                  onChange={(e) =>
-                    handleInputChange("tokenAddress", e.target.value)
-                  }
-                />
+              <HelpTooltip title="选择用于奖励分配和质押的ERC20代币类型">
+                <FormControl fullWidth margin="normal" required>
+                  <InputLabel>代币类型</InputLabel>
+                  <Select
+                    value={formData.tokenAddress}
+                    label="代币类型"
+                    onChange={(e) =>
+                      handleInputChange("tokenAddress", e.target.value)
+                    }
+                  >
+                    {Object.entries(getCurrentTestTokens()).map(([tokenSymbol, address]) => (
+                      <MenuItem key={tokenSymbol} value={address}>
+                        {tokenSymbol} ({address.slice(0, 6)}...{address.slice(-4)})
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
               </HelpTooltip>
             </Box>
           )}
@@ -677,7 +684,14 @@ const CreateOath: React.FC = () => {
                   type="text"
                   InputProps={{
                     startAdornment: (
-                      <InputAdornment position="start">Token</InputAdornment>
+                      <InputAdornment position="start">
+                        {(() => {
+                          const found = Object.entries(getCurrentTestTokens()).find(
+                            (entry) => entry[1] === formData.tokenAddress
+                          );
+                          return found ? found[0] : "Token";
+                        })()}
+                      </InputAdornment>
                     ),
                   }}
                   value={
@@ -687,10 +701,10 @@ const CreateOath: React.FC = () => {
                   }
                   onChange={(e) => {
                     const value = e.target.value;
-                    if (value === "" || /^\d*\.?\d*$/.test(value)) {
+                    if (value === "" || /^\d*\.?\d*$|^0\.$/.test(value)) {
                       handleInputChange(
                         "totalReward",
-                        value === "" ? 0 : parseFloat(value)
+                        value === "" ? 0 : value
                       );
                     }
                   }}
@@ -707,7 +721,14 @@ const CreateOath: React.FC = () => {
                   type="text"
                   InputProps={{
                     startAdornment: (
-                      <InputAdornment position="start">Token</InputAdornment>
+                      <InputAdornment position="start">
+                        {(() => {
+                          const found = Object.entries(getCurrentTestTokens()).find(
+                            (entry) => entry[1] === formData.tokenAddress
+                          );
+                          return found ? found[0] : "Token";
+                        })()}
+                      </InputAdornment>
                     ),
                   }}
                   value={
@@ -717,10 +738,10 @@ const CreateOath: React.FC = () => {
                   }
                   onChange={(e) => {
                     const value = e.target.value;
-                    if (value === "" || /^\d*\.?\d*$/.test(value)) {
+                    if (value === "" || /^\d*\.?\d*$|^0\.$/.test(value)) {
                       handleInputChange(
                         "committerStake",
-                        value === "" ? 0 : parseFloat(value)
+                        value === "" ? 0 : value
                       );
                     }
                   }}
@@ -737,7 +758,14 @@ const CreateOath: React.FC = () => {
                   type="text"
                   InputProps={{
                     startAdornment: (
-                      <InputAdornment position="start">Token</InputAdornment>
+                      <InputAdornment position="start">
+                        {(() => {
+                          const found = Object.entries(getCurrentTestTokens()).find(
+                            (entry) => entry[1] === formData.tokenAddress
+                          );
+                          return found ? found[0] : "Token";
+                        })()}
+                      </InputAdornment>
                     ),
                   }}
                   value={
@@ -747,10 +775,10 @@ const CreateOath: React.FC = () => {
                   }
                   onChange={(e) => {
                     const value = e.target.value;
-                    if (value === "" || /^\d*\.?\d*$/.test(value)) {
+                    if (value === "" || /^\d*\.?\d*$|^0\.$/.test(value)) {
                       handleInputChange(
                         "supervisorStake",
-                        value === "" ? 0 : parseFloat(value)
+                        value === "" ? 0 : value
                       );
                     }
                   }}
