@@ -292,18 +292,77 @@ const CreateOath: React.FC = () => {
       console.log("提交的誓约数据:", oathData);
       console.log("代币地址:", formData.tokenAddress);
 
-      // 5. 检查代币余额
+      // 5. 检查代币是否在白名单中
+      const isWhitelisted = await contractService.isTokenWhitelisted(formData.tokenAddress);
+      console.log("代币白名单状态:", isWhitelisted);
+      
+      if (!isWhitelisted) {
+        throw new Error(
+          `所选代币未在合约白名单中！\n` +
+          `代币地址: ${formData.tokenAddress}\n` +
+          `请联系管理员将此代币添加到白名单，或选择其他已支持的代币。`
+        );
+      }
+
+      // 6. 检查代币余额
       const balance = await contractService.getTokenBalance(
         formData.tokenAddress,
         userAddress
       );
       console.log("代币余额:", balance);
 
-      // 移除重复定义：committerStakeValue 已在上方定义
+      // 检查是否为WETH且余额不足
       if (new BigNumber(balance).isLessThan(committerStakeValue)) {
-        throw new Error(
-          `代币余额不足，需要 ${committerStakeValue}，当前余额 ${balance}`
-        );
+        const isWETH = contractService.isWETH(formData.tokenAddress);
+        
+        if (isWETH) {
+          // 检查ETH余额
+          const ethBalance = await contractService.getETHBalance(userAddress);
+          console.log("ETH余额:", ethBalance);
+          
+          if (new BigNumber(ethBalance).isGreaterThanOrEqualTo(committerStakeValue)) {
+            // 提示用户包装ETH
+            const shouldWrap = window.confirm(
+              `WETH余额不足（当前: ${balance}，需要: ${committerStakeValue}）\n` +
+              `但您有足够的ETH余额（${ethBalance}）\n` +
+              `是否将 ${committerStakeValue} ETH 包装为 WETH？`
+            );
+            
+            if (shouldWrap) {
+              console.log("开始包装ETH为WETH...");
+              const wrapTx = await contractService.wrapETH(committerStakeValue);
+              console.log("等待包装交易确认...");
+              await wrapTx.wait();
+              console.log("ETH包装为WETH成功");
+              
+              // 重新检查WETH余额
+              const newBalance = await contractService.getTokenBalance(
+                formData.tokenAddress,
+                userAddress
+              );
+              console.log("包装后WETH余额:", newBalance);
+              
+              if (new BigNumber(newBalance).isLessThan(committerStakeValue)) {
+                throw new Error(
+                  `包装后WETH余额仍不足，需要 ${committerStakeValue}，当前余额 ${newBalance}`
+                );
+              }
+            } else {
+              throw new Error("用户取消了ETH包装操作");
+            }
+          } else {
+            throw new Error(
+              `余额不足！\n` +
+              `WETH余额: ${balance}（需要: ${committerStakeValue}）\n` +
+              `ETH余额: ${ethBalance}（需要: ${committerStakeValue}）\n` +
+              `请先获取足够的ETH或WETH`
+            );
+          }
+        } else {
+          throw new Error(
+            `代币余额不足，需要 ${committerStakeValue}，当前余额 ${balance}`
+          );
+        }
       }
 
       // 6. 检查并授权代币

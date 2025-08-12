@@ -248,16 +248,58 @@ export class ContractService {
         maxSupervisorMisses: 3,     // 固定：最多错过3次
         maxCommitterFailures: 2,    // 固定：最多失败2次
         checkRoundsCount: oathData.duration, // 检查轮数等于天数
-        startTime: Math.floor(Date.now() / 1000), // 当前时间
-        endTime: Math.floor(Date.now() / 1000) + (oathData.duration * 86400), // 结束时间
+        startTime: Math.floor(Date.now() / 1000) + 300, // 当前时间 + 5分钟
+        endTime: Math.floor(Date.now() / 1000) + 300 + (oathData.duration * 86400), // 结束时间
         createTime: Math.floor(Date.now() / 1000), // 创建时间
         creator,
         token: tokenAddress,
         status: 0 // 初始状态
       };
       
+      // 详细的参数验证日志
+      console.log('=== 创建誓约参数验证 ===');
+      console.log('创建者地址:', creator);
+      console.log('守约人地址:', contractOathData.committer);
+      console.log('监督者地址:', contractOathData.supervisors);
+      console.log('代币地址:', tokenAddress);
+      console.log('总奖励金额 (wei):', contractOathData.totalReward.toString());
+      console.log('守约人质押 (wei):', contractOathData.committerStake.toString());
+      console.log('监督者质押 (wei):', contractOathData.supervisorStake.toString());
+      console.log('开始时间:', contractOathData.startTime, '(当前时间:', Math.floor(Date.now() / 1000), ')');
+      console.log('结束时间:', contractOathData.endTime);
+      console.log('检查轮数:', contractOathData.checkRoundsCount);
+      console.log('监督者奖励比例:', contractOathData.supervisorRewardRatio);
+      console.log('检查阈值百分比:', contractOathData.checkThresholdPercent);
+      console.log('检查间隔:', contractOathData.checkInterval);
+      console.log('检查窗口:', contractOathData.checkWindow);
+      
+      // 检查角色重复
+      console.log('=== 角色重复检查 ===');
+      console.log('创建者 == 守约人?', creator === contractOathData.committer);
+      console.log('创建者 == 监督者?', contractOathData.supervisors.includes(creator));
+      console.log('守约人 == 监督者?', contractOathData.supervisors.includes(contractOathData.committer));
+      
+      // 检查代币余额和授权
+      const balance = await tokenContract.balanceOf(creator);
+      const allowance = await tokenContract.allowance(creator, this.chainOathContract.target);
+      console.log('=== 代币检查 ===');
+      console.log('创建者代币余额 (wei):', balance.toString());
+      console.log('合约授权额度 (wei):', allowance.toString());
+      console.log('需要的金额 (wei):', contractOathData.totalReward.toString());
+      console.log('余额足够?', balance >= contractOathData.totalReward);
+      console.log('授权足够?', allowance >= contractOathData.totalReward);
+      console.log('========================');
+      
+      // 监听DebugLog事件
+      const debugFilter = this.chainOathContract.filters.DebugLog();
+      this.chainOathContract.on(debugFilter, (message, step) => {
+        console.log(`🔍 合约调试日志 [步骤${step}]: ${message}`);
+      });
+      
       // 调用合约的 createOath 函数
+      console.log('🚀 开始调用合约 createOath 函数...');
       const tx = await this.chainOathContract.createOath(contractOathData, tokenAddress);
+      console.log('✅ createOath 交易已提交，交易哈希:', tx.hash);
       
       console.log('创建誓约交易已提交:', tx.hash);
       
@@ -726,6 +768,42 @@ export class ContractService {
       return tx;
     } catch (error) {
       console.error('解包所有WETH失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 检查代币是否在白名单中
+   */
+  async isTokenWhitelisted(tokenAddress: string): Promise<boolean> {
+    try {
+      if (!this.chainOathContract) {
+        throw new Error('合约未初始化');
+      }
+
+      return await this.chainOathContract.tokenWhitelist(tokenAddress);
+    } catch (error) {
+      console.error('检查代币白名单状态失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 更新代币白名单（仅合约所有者可调用）
+   */
+  async updateTokenWhitelist(tokenAddress: string, isWhitelisted: boolean): Promise<ethers.TransactionResponse> {
+    try {
+      if (!this.chainOathContract) {
+        throw new Error('合约未初始化');
+      }
+
+      console.log(`更新代币白名单: ${tokenAddress} -> ${isWhitelisted}`);
+      const tx = await this.chainOathContract.updateTokenWhitelist(tokenAddress, isWhitelisted);
+      
+      console.log('白名单更新交易已提交:', tx.hash);
+      return tx;
+    } catch (error) {
+      console.error('更新代币白名单失败:', error);
       throw error;
     }
   }

@@ -8,6 +8,7 @@ import Error from './pages/Error';
 import MyOaths from './pages/MyOaths';
 import OathDetail from './pages/OathDetail';
 import StakeParticipation from './pages/StakeParticipation';
+import AdminPanel from './pages/AdminPanel';
 
 function App() {
   return (
@@ -21,6 +22,7 @@ function App() {
           <Route path="/my-oaths" element={<MyOaths />} />
           <Route path="/oath/:id" element={<OathDetail />} />
           <Route path="/stake/:oathId" element={<StakeParticipation />} />
+          <Route path="/admin" element={<AdminPanel />} />
         </Routes>
       </Router>
     </ThemeProvider>

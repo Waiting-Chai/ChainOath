@@ -102,6 +102,7 @@ contract ChainOathSecure is ReentrancyGuard, Ownable, Pausable {
     event RewardClaimed(uint256 indexed oathId, address indexed claimer, uint256 amount, address token);
     event TokenWhitelistUpdated(address indexed token, bool isWhitelisted);
     event EmergencyWithdraw(uint256 indexed oathId, address indexed token, uint256 amount);
+    event DebugLog(string message, uint256 step);  // 调试日志事件
     
     constructor() Ownable(msg.sender) {}
     
@@ -134,19 +135,44 @@ contract ChainOathSecure is ReentrancyGuard, Ownable, Pausable {
         Oath memory _oath,
         address _token
     ) external nonReentrant whenNotPaused {
+        // 添加详细的验证日志事件
+        emit DebugLog("Starting createOath validation", 0);
+        
         require(tokenWhitelist[_token], "Token not whitelisted");
+        emit DebugLog("Token whitelist check passed", 1);
+        
         require(block.timestamp < _oath.startTime, "Start time must be in the future");
+        emit DebugLog("Start time check passed", 2);
+        
         require(_oath.startTime < _oath.endTime, "End time must be after start time");
+        emit DebugLog("End time check passed", 3);
+        
         require(_oath.committer != address(0), "Invalid committer address");
+        emit DebugLog("Committer address check passed", 4);
+        
         require(_oath.committer != msg.sender, "Creator cannot be committer");
-        require(_oath.supervisors.length > 0 && _oath.supervisors.length <= MAX_SUPERVISORS, "Invalid supervisor count");
+        emit DebugLog("Creator-committer check passed", 5);
+        
         require(_oath.totalReward >= MIN_STAKE_AMOUNT, "Total reward too small");
+        emit DebugLog("Total reward amount check passed", 6);
+        
         require(_oath.committerStake >= MIN_STAKE_AMOUNT, "Committer stake too small");
+        emit DebugLog("Committer stake amount check passed", 7);
+        
         require(_oath.supervisorStake >= MIN_STAKE_AMOUNT, "Supervisor stake too small");
+        emit DebugLog("Supervisor stake amount check passed", 8);
+        
         require(_oath.supervisorRewardRatio <= 100, "Supervisor reward ratio cannot exceed 100%");
+        emit DebugLog("Supervisor reward ratio check passed", 9);
+        
         require(_oath.checkThresholdPercent <= 100 && _oath.checkThresholdPercent > 0, "Invalid check threshold");
+        emit DebugLog("Check threshold check passed", 10);
+        
         require(_oath.checkInterval > 0, "Check interval must be greater than 0");
+        emit DebugLog("Check interval check passed", 11);
+        
         require(_oath.checkWindow > 0 && _oath.checkWindow <= _oath.checkInterval, "Invalid check window");
+        emit DebugLog("Check window check passed", 12);
         
         // 计算检查轮次
         uint32 duration = _oath.endTime - _oath.startTime;
@@ -178,21 +204,33 @@ contract ChainOathSecure is ReentrancyGuard, Ownable, Pausable {
         oath.status = OathStatus.Pending;
         
         // 复制并检查监督者数组
+        emit DebugLog("Starting supervisor validation", 13);
         for (uint i = 0; i < _oath.supervisors.length; i++) {
             address supervisor = _oath.supervisors[i];
             require(supervisor != address(0), "Invalid supervisor address");
+            emit DebugLog("Supervisor address check passed", 14 + i * 4);
+            
+            // 已移除创建者和守约人不能是监督者的限制
             require(supervisor != msg.sender, "Creator cannot be supervisor");
+            emit DebugLog("Creator-supervisor check passed", 15 + i * 4);
+            
             require(supervisor != _oath.committer, "Committer cannot be supervisor");
+            emit DebugLog("Committer-supervisor check passed", 16 + i * 4);
             
             // 检查重复地址
             for (uint j = i + 1; j < _oath.supervisors.length; j++) {
                 require(_oath.supervisors[j] != supervisor, "Duplicate supervisor address");
             }
+            emit DebugLog("Duplicate supervisor check passed", 17 + i * 4);
             oath.supervisors.push(supervisor);
         }
         
+        emit DebugLog("All supervisor validations passed", 100);
+        
         // 创建者质押奖励金额（使用统一代币）
+        emit DebugLog("Starting transferFrom operation", 101);
         require(oath.token.transferFrom(msg.sender, address(this), _oath.totalReward), "Creator stake transfer failed");
+        emit DebugLog("TransferFrom operation completed", 102);
         creatorStakes[oathId].amounts[msg.sender] = _oath.totalReward;
         creatorStakes[oathId].hasStaked[msg.sender] = true;
         

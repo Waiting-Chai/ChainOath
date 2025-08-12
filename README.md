@@ -84,7 +84,7 @@ cp .env.example .env
 VITE_NETWORK=sepolia  # 可选: mainnet, sepolia, localhost
 
 # Sepolia 测试网 - 单一主合约地址
-VITE_SEPOLIA_CONTRACT_ADDRESS=0x8bEDB3ABA5A94ee0Cbcb4886C8c34D1fd7c3b2ea
+VITE_SEPOLIA_CONTRACT_ADDRESS=0x5fA4C99f599E246757e6b5b6Fb9cD3B894D1331b
 ```
 
 3. **网络说明**
@@ -101,12 +101,12 @@ VITE_SEPOLIA_CONTRACT_ADDRESS=0x8bEDB3ABA5A94ee0Cbcb4886C8c34D1fd7c3b2ea
 
 ### Sepolia 测试网部署
 
-**合约地址**: `0x8bEDB3ABA5A94ee0Cbcb4886C8c34D1fd7c3b2ea`
+**合约地址**: `0x5fA4C99f599E246757e6b5b6Fb9cD3B894D1331b`
 **部署交易**: `0x28e03776569cf3696cadbf4d89af29209bdc8cfddf1b2d5f9f19764e1cad79aa`
 **部署区块**: `8960243`
 **网络**: Sepolia Testnet (Chain ID: 11155111)
 **Gas 费用**: 0.000006788287071236 ETH
-**区块浏览器**: [查看合约](https://sepolia.etherscan.io/address/0x8bEDB3ABA5A94ee0Cbcb4886C8c34D1fd7c3b2ea)
+**区块浏览器**: [查看合约](https://sepolia.etherscan.io/address/0x5fA4C99f599E246757e6b5b6Fb9cD3B894D1331b)
 
 ### 合约验证
 
