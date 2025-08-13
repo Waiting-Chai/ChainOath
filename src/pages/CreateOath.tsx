@@ -275,12 +275,18 @@ const CreateOath: React.FC = () => {
         return;
       }
 
+      // 创建者只需要支付奖励池金额（totalReward），守约人和监督者各自支付自己的质押金
+      const totalRewardValue = typeof formData.totalReward === 'string' 
+        ? formData.totalReward.trim() 
+        : formData.totalReward.toString();
+
       // 4. 构造合约调用数据（不需要shiftedBy转换，createOath方法接收原始字符串）
       const oathData = {
         title: formData.title,
         description: formData.description,
         committers: [formData.committer], // 转换为数组
         supervisors: formData.supervisors.filter((addr) => addr.trim() !== ""),
+        totalReward: totalRewardValue, // 奖励池金额，由创建者支付
         committerStakeAmount: committerStakeValue,
         supervisorStakeAmount: typeof formData.supervisorStake === 'string' 
           ? formData.supervisorStake 
@@ -311,8 +317,11 @@ const CreateOath: React.FC = () => {
       );
       console.log("代币余额:", balance);
 
+      const totalRequiredAmount = totalRewardValue;
+      console.log("创建者需要支付的奖励池金额:", totalRequiredAmount);
+
       // 检查是否为WETH且余额不足
-      if (new BigNumber(balance).isLessThan(committerStakeValue)) {
+      if (new BigNumber(balance).isLessThan(totalRequiredAmount)) {
         const isWETH = contractService.isWETH(formData.tokenAddress);
         
         if (isWETH) {
@@ -320,17 +329,18 @@ const CreateOath: React.FC = () => {
           const ethBalance = await contractService.getETHBalance(userAddress);
           console.log("ETH余额:", ethBalance);
           
-          if (new BigNumber(ethBalance).isGreaterThanOrEqualTo(committerStakeValue)) {
+          if (new BigNumber(ethBalance).isGreaterThanOrEqualTo(totalRequiredAmount)) {
             // 提示用户包装ETH
             const shouldWrap = window.confirm(
-              `WETH余额不足（当前: ${balance}，需要: ${committerStakeValue}）\n` +
-              `但您有足够的ETH余额（${ethBalance}）\n` +
-              `是否将 ${committerStakeValue} ETH 包装为 WETH？`
+              `WETH余额不足（当前: ${balance}，需要: ${totalRequiredAmount}）\n` +
+              `创建者需要支付奖励池金额，守约人和监督者将各自支付质押金\n` +
+              `您有足够的ETH余额（${ethBalance}）\n` +
+              `是否将 ${totalRequiredAmount} ETH 包装为 WETH？`
             );
             
             if (shouldWrap) {
               console.log("开始包装ETH为WETH...");
-              const wrapTx = await contractService.wrapETH(committerStakeValue);
+              const wrapTx = await contractService.wrapETH(totalRequiredAmount);
               console.log("等待包装交易确认...");
               await wrapTx.wait();
               console.log("ETH包装为WETH成功");
@@ -342,9 +352,9 @@ const CreateOath: React.FC = () => {
               );
               console.log("包装后WETH余额:", newBalance);
               
-              if (new BigNumber(newBalance).isLessThan(committerStakeValue)) {
+              if (new BigNumber(newBalance).isLessThan(totalRequiredAmount)) {
                 throw new Error(
-                  `包装后WETH余额仍不足，需要 ${committerStakeValue}，当前余额 ${newBalance}`
+                  `包装后WETH余额仍不足，需要 ${totalRequiredAmount}（奖励池金额），当前余额 ${newBalance}`
                 );
               }
             } else {
@@ -353,19 +363,21 @@ const CreateOath: React.FC = () => {
           } else {
             throw new Error(
               `余额不足！\n` +
-              `WETH余额: ${balance}（需要: ${committerStakeValue}）\n` +
-              `ETH余额: ${ethBalance}（需要: ${committerStakeValue}）\n` +
+              `WETH余额: ${balance}（需要: ${totalRequiredAmount}，奖励池金额）\n` +
+              `ETH余额: ${ethBalance}（需要: ${totalRequiredAmount}）\n` +
+              `创建者只需支付奖励池，守约人和监督者各自支付质押金\n` +
               `请先获取足够的ETH或WETH`
             );
           }
         } else {
           throw new Error(
-            `代币余额不足，需要 ${committerStakeValue}，当前余额 ${balance}`
+            `代币余额不足，需要 ${totalRequiredAmount}（奖励池金额），当前余额 ${balance}\n` +
+            `创建者只需支付奖励池，守约人和监督者各自支付质押金`
           );
         }
       }
 
-      // 6. 检查并授权代币
+      // 7. 检查并授权代币
       const networkConfig = getCurrentNetworkConfig();
       const allowance = await contractService.getTokenAllowance(
         formData.tokenAddress,
@@ -373,12 +385,12 @@ const CreateOath: React.FC = () => {
         networkConfig.chainOathAddress
       );
 
-      if (new BigNumber(allowance).isLessThan(committerStakeValue)) {
+      if (new BigNumber(allowance).isLessThan(totalRequiredAmount)) {
         console.log("需要授权代币...");
         const approveTx = await contractService.approveToken(
           formData.tokenAddress,
           networkConfig.chainOathAddress,
-          committerStakeValue  // 传递用户输入的金额，不是wei
+          totalRequiredAmount  // 传递总需要的金额，不是wei
         );
 
         console.log("等待授权交易确认...");
@@ -386,7 +398,7 @@ const CreateOath: React.FC = () => {
         console.log("代币授权成功");
       }
 
-      // 7. 创建誓约
+      // 8. 创建誓约
       console.log("创建誓约中...");
       const { tx, oathId } = await contractService.createOath(
         oathData,
@@ -397,18 +409,20 @@ const CreateOath: React.FC = () => {
       await tx.wait();
       console.log("誓约创建成功，ID:", oathId);
 
-      // 8. 创建者进行质押
-      console.log("创建者质押中...");
-      const stakeTx = await contractService.committerStake(
-        oathId,
-        committerStakeValue  // 传递用户输入的金额，不是wei
-      );
+      // 9. 创建者进行质押（如果创建者是守约人）
+      if (formData.committer.toLowerCase() === userAddress.toLowerCase()) {
+        console.log("创建者质押中...");
+        const stakeTx = await contractService.committerStake(
+          oathId,
+          committerStakeValue  // 传递用户输入的金额，不是wei
+        );
 
-      console.log("等待质押交易确认...");
-      await stakeTx.wait();
-      console.log("创建者质押成功");
+        console.log("等待质押交易确认...");
+        await stakeTx.wait();
+        console.log("创建者质押成功");
+      }
 
-      // 9. 发送通知给所有参与者
+      // 10. 发送通知给所有参与者
       const allParticipants = [
         formData.committer,
         ...formData.supervisors,
@@ -422,7 +436,7 @@ const CreateOath: React.FC = () => {
       );
 
       // 发送质押提醒给守约者（如果不是创建者）
-      if (formData.committer !== userAddress) {
+      if (formData.committer.toLowerCase() !== userAddress.toLowerCase()) {
         await notificationService.sendStakeReminderWithLink(
           oathId,
           formData.title,
@@ -439,7 +453,7 @@ const CreateOath: React.FC = () => {
         "supervisor"
       );
 
-      // 10. 设置合约事件监听
+      // 11. 设置合约事件监听
       contractService.setupEventListeners({
         onOathCreated: (oathId: string, creator: string, title: string) => {
           console.log("监听到誓约创建事件:", { oathId, creator, title });
@@ -733,11 +747,11 @@ const CreateOath: React.FC = () => {
                 ))}
               </Box>
 
-              <HelpTooltip title="创建者质押的总奖励金额，将在誓约完成后分配给守约人和监督者">
+              <HelpTooltip title="创建者支付的奖励池金额，将根据监督结果分配给守约人和监督者。守约人和监督者需各自支付质押金">
                 <TextField
                   fullWidth
-                  label="总奖励金额"
-                  placeholder="创建者质押的总奖励金额"
+                  label="总奖励金额（创建者支付）"
+                  placeholder="创建者支付的奖励池金额"
                   variant="outlined"
                   margin="normal"
                   type="text"
@@ -1109,16 +1123,16 @@ const CreateOath: React.FC = () => {
 
                   <Box>
                     <Typography variant="body2" color="text.secondary">
-                      总奖励金额
+                      总奖励金额（创建者支付）
                     </Typography>
-                    <Typography variant="body1">
+                    <Typography variant="body1" sx={{ fontWeight: 'bold', color: 'primary.main' }}>
                       {formData.totalReward} Token
                     </Typography>
                   </Box>
 
                   <Box>
                     <Typography variant="body2" color="text.secondary">
-                      守约人质押金额
+                      守约人质押金额（守约人支付）
                     </Typography>
                     <Typography variant="body1">
                       {formData.committerStake} Token
@@ -1127,13 +1141,31 @@ const CreateOath: React.FC = () => {
 
                   <Box>
                     <Typography variant="body2" color="text.secondary">
-                      监督者质押金额
+                      监督者质押金额（每位监督者支付）
                     </Typography>
                     <Typography variant="body1">
                       {formData.supervisorStake} Token
                     </Typography>
                   </Box>
                 </Stack>
+              </Paper>
+
+              <Paper
+                variant="outlined"
+                sx={{ p: 2, mb: 3, bgcolor: 'info.light', borderColor: 'info.main' }}
+              >
+                <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 1 }}>
+                  💡 支付说明
+                </Typography>
+                <Typography variant="body2">
+                  • 创建者（您）只需支付奖励池金额：{formData.totalReward} Token
+                </Typography>
+                <Typography variant="body2">
+                  • 守约人需要自己支付质押金：{formData.committerStake} Token
+                </Typography>
+                <Typography variant="body2">
+                  • 每位监督者需要自己支付质押金：{formData.supervisorStake} Token
+                </Typography>
               </Paper>
 
               <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>

@@ -125,7 +125,6 @@ export const ChainOathSecureABI = [
       { "name": "title", "type": "string" },
       { "name": "description", "type": "string" },
       { "name": "committer", "type": "address" },
-      { "name": "supervisors", "type": "address[]" },
       { "name": "totalReward", "type": "uint256" },
       { "name": "committerStake", "type": "uint256" },
       { "name": "supervisorStake", "type": "uint256" },
@@ -146,7 +145,58 @@ export const ChainOathSecureABI = [
     "stateMutability": "view"
   },
   {
-    "type": "event",
+    "type": "function",
+    "name": "getOath",
+    "inputs": [{ "name": "_oathId", "type": "uint256" }],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "components": [
+          { "name": "title", "type": "string" },
+          { "name": "description", "type": "string" },
+          { "name": "committer", "type": "address" },
+          { "name": "supervisors", "type": "address[]" },
+          { "name": "totalReward", "type": "uint256" },
+          { "name": "committerStake", "type": "uint256" },
+          { "name": "supervisorStake", "type": "uint256" },
+          { "name": "supervisorRewardRatio", "type": "uint16" },
+          { "name": "checkInterval", "type": "uint32" },
+          { "name": "checkWindow", "type": "uint32" },
+          { "name": "checkThresholdPercent", "type": "uint16" },
+          { "name": "maxSupervisorMisses", "type": "uint16" },
+          { "name": "maxCommitterFailures", "type": "uint16" },
+          { "name": "checkRoundsCount", "type": "uint16" },
+          { "name": "startTime", "type": "uint32" },
+          { "name": "endTime", "type": "uint32" },
+          { "name": "createTime", "type": "uint32" },
+          { "name": "creator", "type": "address" },
+          { "name": "token", "type": "address" },
+          { "name": "status", "type": "uint8" }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+   },
+   {
+     "type": "function",
+     "name": "hasStaked",
+     "inputs": [
+       { "name": "_oathId", "type": "uint256" },
+       { "name": "_addr", "type": "address" }
+     ],
+     "outputs": [{ "name": "", "type": "bool" }],
+     "stateMutability": "view"
+   },
+   {
+     "type": "function",
+     "name": "checkOathStatus",
+     "inputs": [{ "name": "_oathId", "type": "uint256" }],
+     "outputs": [],
+     "stateMutability": "nonpayable"
+   },
+   {
+     "type": "event",
     "name": "OathCreated",
     "inputs": [
       { "name": "oathId", "type": "uint256", "indexed": true },

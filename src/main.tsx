@@ -6,6 +6,7 @@ import App from './App.tsx'
 // 在开发环境中导入XMTP测试函数
 if (import.meta.env.DEV) {
   import('./test/xmtpTest');
+  import('./test/xmtpNotificationTest');
 }
 
 createRoot(document.getElementById('root')!).render(

@@ -40,7 +40,8 @@ const AdminPanel: React.FC = () => {
     try {
       setLoading(true);
       
-      // 连接钱包
+      // 初始化并连接钱包
+      await contractService.initialize();
       const address = await contractService.connectWallet();
       setUserAddress(address);
       

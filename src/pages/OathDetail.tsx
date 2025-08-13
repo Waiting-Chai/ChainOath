@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, Link as RouterLink } from 'react-router-dom';
 import {
   AppBar,
@@ -11,12 +11,15 @@ import {
   LinearProgress,
   List,
   ListItem,
-  ListItemAvatar,
   ListItemText,
   Paper,
   Toolbar,
   Typography,
-  Grid
+  Grid,
+  CircularProgress,
+  Alert,
+  Menu,
+  MenuItem
 } from '@mui/material';
 import {
   Link as LinkIcon,
@@ -25,84 +28,329 @@ import {
   AccessTime as AccessTimeIcon,
   CalendarToday as CalendarTodayIcon,
   AccountBalanceWallet as AccountBalanceWalletIcon,
-  Description as DescriptionIcon,
   Person as PersonIcon,
   Comment as CommentIcon,
   ArrowBack as ArrowBackIcon
 } from '@mui/icons-material';
+import { contractService } from '../services/contractService';
+import { ethers } from 'ethers';
+import { getCurrentNetworkConfig } from '../contracts/config';
+import {
+  Star as StarIcon,
+  Gavel as GavelIcon,
+  AccountBalance as AccountBalanceIcon,
+  MonetizationOn as MonetizationOnIcon,
+  Share as ShareIcon,
+  Twitter as TwitterIcon,
+  Chat as WechatIcon,
+  ExpandMore as ExpandMoreIcon,
+  OpenInNew as OpenInNewIcon
+} from '@mui/icons-material';
+
+interface OathDetailData {
+  id: string;
+  title: string;
+  description: string;
+  status: 'active' | 'completed' | 'failed';
+  progress: number;
+  startDate: string;
+  deadline: string;
+  stake: string;
+  creator: {
+    name: string;
+    avatar: string;
+    address: string;
+  };
+  witnesses: Array<{
+    name: string;
+    status: 'staked' | 'not_staked';
+    address: string;
+    role: 'creator' | 'supervisor';
+  }>;
+  committers: string[];
+  supervisors: string[];
+  checkpoints: Array<{
+    date: string;
+    title: string;
+    description: string;
+    status: string;
+    timestamp: number;
+  }>;
+  updates: Array<{
+    date: string;
+    user: string;
+    avatar: string;
+    content: string;
+    attachments: string[];
+  }>;
+  contractAddress?: string;
+  checkInterval: number;
+  checkWindow: number;
+  startTime: number;
+  endTime: number;
+}
 
 const OathDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
-  
-  // 模拟誓约数据
-  const oath = {
-    id: id || '1',
-    title: '每天跑步5公里',
-    description: '坚持每天早上跑步5公里，持续30天。这是一个健康挑战，旨在培养良好的运动习惯，提高身体素质。每天需要记录跑步轨迹和时间，作为完成证明。',
-    status: 'active',
-    progress: 60,
-    startDate: '2023-11-01',
-    deadline: '2023-12-31',
-    stake: '0.1 ETH',
-    creator: {
-      name: '张三',
-      avatar: 'https://mui.com/static/images/avatar/1.jpg'
-    },
-    witnesses: [
-      {
-        name: '李四',
-        avatar: 'https://mui.com/static/images/avatar/2.jpg',
-        status: 'confirmed'
-      },
-      {
-        name: '王五',
-        avatar: 'https://mui.com/static/images/avatar/3.jpg',
-        status: 'pending'
+  const [oath, setOath] = useState<OathDetailData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [userAddress, setUserAddress] = useState<string>('');
+  const [shareMenuAnchor, setShareMenuAnchor] = useState<null | HTMLElement>(null);
+  const [supervisorStatus, setSupervisorStatus] = useState<{
+    missCount: number;
+    successfulChecks: number;
+    isDisqualified: boolean;
+    expectedReward: string;
+  } | null>(null);
+  const [checkTimeInfo, setCheckTimeInfo] = useState<{
+    nextCheckTime: number;
+    timeUntilNextCheck: number;
+    timeUntilCheckWindowEnd: number;
+    isInCheckWindow: boolean;
+  } | null>(null);
+
+  // 计算检查点
+  const calculateCheckpoints = (oathData: {
+    startTime: number;
+    endTime: number;
+    checkInterval: number;
+    checkWindow: number;
+  }) => {
+    const checkpoints = [];
+    const startTime = oathData.startTime;
+    const endTime = oathData.endTime;
+    const checkInterval = oathData.checkInterval;
+    
+    let currentTime = startTime;
+    let index = 0;
+    
+    while (currentTime <= endTime) {
+      const date = new Date(currentTime * 1000);
+      const now = Date.now();
+      const checkpointTime = currentTime * 1000;
+      
+      let status: 'completed' | 'active' | 'pending';
+      if (checkpointTime < now - (oathData.checkWindow * 1000)) {
+        status = 'completed';
+      } else if (checkpointTime <= now && now <= checkpointTime + (oathData.checkWindow * 1000)) {
+        status = 'active';
+      } else {
+        status = 'pending';
       }
-    ],
-    checkpoints: [
-      {
-        date: '2023-11-10',
-        title: '第一周检查点',
-        description: '完成第一周的跑步任务',
-        status: 'completed'
-      },
-      {
-        date: '2023-11-20',
-        title: '第二周检查点',
-        description: '完成第二周的跑步任务',
-        status: 'completed'
-      },
-      {
-        date: '2023-11-30',
-        title: '第三周检查点',
-        description: '完成第三周的跑步任务',
-        status: 'active'
-      },
-      {
-        date: '2023-12-10',
-        title: '第四周检查点',
-        description: '完成第四周的跑步任务',
-        status: 'pending'
-      }
-    ],
-    updates: [
-      {
-        date: '2023-11-15',
-        user: '张三',
-        avatar: 'https://mui.com/static/images/avatar/1.jpg',
-        content: '第二周任务已完成，每天都坚持跑步5公里，感觉很好！',
-        attachments: ['https://source.unsplash.com/random/300x200?running']
-      },
-      {
-        date: '2023-11-08',
-        user: '张三',
-        avatar: 'https://mui.com/static/images/avatar/1.jpg',
-        content: '第一周任务完成，虽然有些困难但还是坚持下来了。',
-        attachments: []
-      }
-    ]
+      
+      checkpoints.push({
+        title: `检查点 ${index + 1}`,
+        date: date.toLocaleDateString('zh-CN'),
+        description: `第 ${index + 1} 次进度检查`,
+        status,
+        timestamp: currentTime
+      });
+      
+      currentTime += checkInterval;
+      index++;
+    }
+    
+    return checkpoints;
   };
+
+  useEffect(() => {
+    const loadOathData = async () => {
+      if (!id) {
+        setError('誓约ID不存在');
+        setLoading(false);
+        return;
+      }
+
+      try {
+        setLoading(true);
+        setError(null);
+        
+        // 初始化合约服务
+        await contractService.initialize();
+        
+        // 获取誓约基本信息
+          const oathData = await contractService.getOath(id);
+         
+         if (!oathData) {
+           setError('誓约不存在');
+           setLoading(false);
+           return;
+         }
+
+         // 计算进度
+         const now = Date.now();
+         const startTime = Number(oathData.startTime) * 1000;
+         const endTime = Number(oathData.endTime) * 1000;
+         const totalDuration = endTime - startTime;
+         const elapsed = now - startTime;
+         const progress = Math.min(Math.max((elapsed / totalDuration) * 100, 0), 100);
+
+         // 根据状态判断誓约状态
+         let status: 'active' | 'completed' | 'failed' = 'active';
+         if (oathData.status === 2) {
+           status = 'completed';
+         } else if (oathData.status === 3) {
+           status = 'failed';
+         }
+
+         // 获取用户地址
+          const accounts = await window.ethereum?.request({ method: 'eth_accounts' });
+          const currentUser = accounts?.[0] || '';
+          setUserAddress(currentUser.toLowerCase());
+
+          // 检查见证人质押状态
+          const witnessesData = [
+            {
+              address: oathData.creator,
+              role: 'creator' as const,
+              name: oathData.creator.slice(0, 6) + '...' + oathData.creator.slice(-4)
+            },
+            ...(oathData.supervisors || []).map((supervisor: string) => ({
+              address: supervisor,
+              role: 'supervisor' as const,
+              name: supervisor.slice(0, 6) + '...' + supervisor.slice(-4)
+            }))
+          ];
+
+          const witnessesWithStakeStatus = await Promise.all(
+            witnessesData.map(async (witness) => {
+              try {
+                const hasStaked = await contractService.hasStaked(id, witness.address);
+                return {
+                  ...witness,
+                  status: hasStaked ? 'staked' : 'not_staked' as 'staked' | 'not_staked'
+                };
+              } catch (err) {
+                console.error('检查质押状态失败:', err);
+                return {
+                  ...witness,
+                  status: 'not_staked' as 'staked' | 'not_staked'
+                };
+              }
+            })
+          );
+
+         // 动态计算检查点
+          const checkpoints = calculateCheckpoints({
+            startTime: oathData.startTime,
+            endTime: oathData.endTime,
+            checkInterval: 86400, // 24小时，从合约常量获取
+            checkWindow: 3600 // 1小时，从合约常量获取
+          });
+
+         // 格式化数据
+         const formattedOath: OathDetailData = {
+           id: id,
+           title: oathData.title,
+           description: oathData.description,
+           status,
+           progress: Math.round(progress),
+           startDate: new Date(startTime).toLocaleDateString('zh-CN'),
+           deadline: new Date(endTime).toLocaleDateString('zh-CN'),
+           stake: `${ethers.formatEther(oathData.committerStakeAmount)} ETH`,
+           creator: {
+             name: oathData.creator.slice(0, 6) + '...' + oathData.creator.slice(-4),
+             avatar: 'https://mui.com/static/images/avatar/1.jpg',
+             address: oathData.creator
+           },
+           witnesses: witnessesWithStakeStatus,
+           checkpoints,
+           updates: [],
+           contractAddress: getCurrentNetworkConfig().chainOathAddress,
+            committers: oathData.committers || [],
+            supervisors: oathData.supervisors || [],
+            checkInterval: 86400, // 24小时
+             checkWindow: 3600, // 1小时
+            startTime: oathData.startTime,
+            endTime: oathData.endTime
+         };
+
+        setOath(formattedOath);
+
+        // 如果当前用户是监督者，获取监督者状态
+         if (oathData.supervisors && oathData.supervisors.includes(currentUser.toLowerCase())) {
+           try {
+             const status = await contractService.getSupervisorStatus(id, currentUser);
+              const reward = await contractService.calculateSupervisorReward(id);
+             setSupervisorStatus({
+               ...status,
+               expectedReward: reward
+             });
+
+             const timeInfo = await contractService.getNextCheckTime(id);
+             setCheckTimeInfo(timeInfo);
+           } catch (err) {
+             console.error('获取监督者状态失败:', err);
+           }
+         }
+      } catch (err: unknown) {
+         console.error('加载誓约数据失败:', err);
+         const errorMessage = err instanceof Error ? err.message : '加载誓约数据失败';
+         setError(errorMessage);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadOathData();
+  }, [id]);
+
+  // 分享到推特
+  const handleShareToTwitter = () => {
+    const shareText = `我在ChainOath上创建了一个誓约：${oath?.title}。一起来见证我的承诺吧！`;
+    const shareUrl = window.location.href;
+    const twitterUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(shareUrl)}`;
+    window.open(twitterUrl, '_blank');
+    setShareMenuAnchor(null);
+  };
+
+  // 分享到微信（生成二维码或复制链接）
+  const handleShareToWechat = () => {
+    const shareText = `${oath?.title} - ChainOath誓约\n${window.location.href}`;
+    navigator.clipboard.writeText(shareText).then(() => {
+      alert('链接已复制到剪贴板，请在微信中粘贴分享');
+    }).catch(() => {
+      alert('复制失败，请手动复制链接分享');
+    });
+    setShareMenuAnchor(null);
+  };
+
+  // 查看区块链记录
+  const handleViewOnBlockchain = () => {
+    const networkConfig = getCurrentNetworkConfig();
+    const explorerUrl = `${networkConfig.blockExplorer}/address/${networkConfig.chainOathAddress}`;
+    window.open(explorerUrl, '_blank');
+  };
+
+  if (loading) {
+    return (
+      <Box sx={{ 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        minHeight: '100vh' 
+      }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (error) {
+    return (
+      <Container maxWidth="md" sx={{ mt: 4 }}>
+        <Alert severity="error">{error}</Alert>
+      </Container>
+    );
+  }
+
+  if (!oath) {
+    return (
+      <Container maxWidth="md" sx={{ mt: 4 }}>
+        <Alert severity="warning">誓约不存在</Alert>
+      </Container>
+    );
+  }
 
   const getStatusChip = (status: string) => {
     switch (status) {
@@ -114,9 +362,22 @@ const OathDetail: React.FC = () => {
         return <Chip icon={<CancelIcon />} label="已失败" color="error" size="small" />;
       case 'pending':
         return <Chip icon={<AccessTimeIcon />} label="待处理" color="default" size="small" />;
+      case 'staked':
+        return <Chip label="已质押" color="success" size="small" />;
+      case 'not_staked':
+        return <Chip label="未质押" color="warning" size="small" />;
       default:
         return null;
     }
+  };
+
+  // 获取用户角色
+  const getUserRole = () => {
+    if (!userAddress || !oath) return null;
+    if (oath.creator.address.toLowerCase() === userAddress) return 'creator';
+    if (oath.committers.some(c => c.toLowerCase() === userAddress)) return 'committer';
+    if (oath.supervisors.some(s => s.toLowerCase() === userAddress)) return 'supervisor';
+    return null;
   };
 
   return (
@@ -253,14 +514,142 @@ const OathDetail: React.FC = () => {
                 </Grid>
               </Grid>
               
-              <Box sx={{ display: 'flex', gap: 2, mt: 3 }}>
-                <Button variant="contained" color="primary" sx={{ borderRadius: 2 }}>
-                  更新进度
-                </Button>
-                <Button variant="outlined" color="primary" sx={{ borderRadius: 2 }}>
+              {/* 角色相关操作按钮 */}
+              <Box sx={{ display: 'flex', gap: 2, mt: 3, flexWrap: 'wrap' }}>
+                {/* 创建者操作 */}
+                {userAddress && oath.creator.address.toLowerCase() === userAddress && (
+                  <>
+                    {oath.status === 'active' && (
+                      <Button 
+                        variant="contained" 
+                        color="error" 
+                        startIcon={<AccountBalanceIcon />}
+                        sx={{ borderRadius: 2 }}
+                      >
+                        撤回合约
+                      </Button>
+                    )}
+                    {(oath.status === 'completed' || oath.status === 'failed') && (
+                      <Button 
+                        variant="contained" 
+                        color="success" 
+                        startIcon={<MonetizationOnIcon />}
+                        sx={{ borderRadius: 2 }}
+                      >
+                        结算收益
+                      </Button>
+                    )}
+                  </>
+                )}
+                
+                {/* 受约人操作 */}
+                {userAddress && oath.committers.some(c => c.toLowerCase() === userAddress) && (
+                  <>
+                    {oath.status === 'active' && (
+                      <Button 
+                        variant="outlined" 
+                        color="primary" 
+                        sx={{ borderRadius: 2 }}
+                      >
+                        更新进度
+                      </Button>
+                    )}
+                    {oath.status === 'completed' && (
+                      <Button 
+                        variant="contained" 
+                        color="success" 
+                        startIcon={<MonetizationOnIcon />}
+                        sx={{ borderRadius: 2 }}
+                      >
+                        领取奖励
+                      </Button>
+                    )}
+                    <Button 
+                      variant="outlined" 
+                      color="warning" 
+                      startIcon={<AccountBalanceIcon />}
+                      sx={{ borderRadius: 2 }}
+                    >
+                      申请退款
+                    </Button>
+                  </>
+                )}
+                
+                {/* 监督者操作 */}
+                {userAddress && oath.supervisors.some(s => s.toLowerCase() === userAddress) && (
+                  <>
+                    {oath.status === 'completed' && (
+                      <Button 
+                        variant="contained" 
+                        color="success" 
+                        startIcon={<MonetizationOnIcon />}
+                        sx={{ borderRadius: 2 }}
+                      >
+                        领取奖励
+                      </Button>
+                    )}
+                    <Button 
+                      variant="outlined" 
+                      color="warning" 
+                      startIcon={<AccountBalanceIcon />}
+                      sx={{ borderRadius: 2 }}
+                    >
+                      申请退款
+                    </Button>
+                  </>
+                )}
+                
+                {/* 通用操作 */}
+                <Button 
+                  variant="outlined" 
+                  color="primary" 
+                  startIcon={<ShareIcon />}
+                  endIcon={<ExpandMoreIcon />}
+                  sx={{ borderRadius: 2 }}
+                  onClick={(e) => setShareMenuAnchor(e.currentTarget)}
+                >
                   分享誓约
                 </Button>
+                
+                {/* 分享菜单 */}
+                <Menu
+                  anchorEl={shareMenuAnchor}
+                  open={Boolean(shareMenuAnchor)}
+                  onClose={() => setShareMenuAnchor(null)}
+                >
+                  <MenuItem onClick={() => handleShareToTwitter()}>
+                    <TwitterIcon sx={{ mr: 1, color: '#1DA1F2' }} />
+                    分享到推特
+                  </MenuItem>
+                  <MenuItem onClick={() => handleShareToWechat()}>
+                    <WechatIcon sx={{ mr: 1, color: '#07C160' }} />
+                    分享到微信
+                  </MenuItem>
+                </Menu>
               </Box>
+              
+              {/* 监督者状态信息 */}
+              {getUserRole() === 'supervisor' && supervisorStatus && (
+                <Box sx={{ mt: 3, p: 2, bgcolor: 'info.light', borderRadius: 1 }}>
+                  <Typography variant="subtitle2" gutterBottom>
+                    监督者状态
+                  </Typography>
+                  <Typography variant="body2">
+                    失职次数: {supervisorStatus.missCount}
+                  </Typography>
+                  <Typography variant="body2">
+                    成功检查次数: {supervisorStatus.successfulChecks}
+                  </Typography>
+                  <Typography variant="body2">
+                    预期收益: {supervisorStatus.expectedReward} ETH
+                  </Typography>
+                  {supervisorStatus.isDisqualified && (
+                    <Typography variant="body2" color="error">
+                      已被取消资格
+                    </Typography>
+                  )}
+                </Box>
+              )}
             </Paper>
             
             {/* Checkpoints */}
@@ -329,6 +718,15 @@ const OathDetail: React.FC = () => {
                     </Typography>
                     
                     {getStatusChip(checkpoint.status)}
+                    
+                    {/* 监督者检查窗口信息 */}
+                    {getUserRole() === 'supervisor' && checkpoint.status === 'active' && checkTimeInfo && (
+                      <Box sx={{ mt: 1, p: 1, bgcolor: 'warning.light', borderRadius: 1 }}>
+                        <Typography variant="caption" color="warning.dark">
+                          检查窗口剩余时间: {Math.max(0, Math.floor(checkTimeInfo.timeUntilCheckWindowEnd / 60))} 分钟
+                        </Typography>
+                      </Box>
+                    )}
                   </Box>
                 ))}
               </Box>
@@ -417,25 +815,36 @@ const OathDetail: React.FC = () => {
               <List sx={{ p: 0 }}>
                 {oath.witnesses.map((witness, index) => (
                   <ListItem key={index} sx={{ px: 0, py: 1 }}>
-                    <ListItemAvatar>
-                      <Avatar src={witness.avatar} />
-                    </ListItemAvatar>
                     <ListItemText 
-                      primary={witness.name} 
-                      secondary={witness.status === 'confirmed' ? '已确认' : '待确认'}
+                      primary={
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <Typography variant="body1">{witness.name}</Typography>
+                          {witness.role === 'creator' && (
+                            <Chip 
+                              icon={<StarIcon />} 
+                              label="创建者" 
+                              size="small" 
+                              color="primary" 
+                              variant="outlined"
+                            />
+                          )}
+                          {witness.role === 'supervisor' && (
+                            <Chip 
+                              icon={<GavelIcon />} 
+                              label="监督者" 
+                              size="small" 
+                              color="secondary" 
+                              variant="outlined"
+                            />
+                          )}
+                        </Box>
+                      }
+                      secondary={witness.status === 'staked' ? '已质押' : '未质押'}
                     />
                     {getStatusChip(witness.status)}
                   </ListItem>
                 ))}
               </List>
-              
-              <Button 
-                variant="outlined" 
-                fullWidth
-                sx={{ mt: 2, borderRadius: 2 }}
-              >
-                添加见证人
-              </Button>
             </Paper>
             
             {/* Contract Info */}
@@ -457,14 +866,15 @@ const OathDetail: React.FC = () => {
                 mb: 2,
                 wordBreak: 'break-all'
               }}>
-                0x1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p7q8r9s
+                {oath.contractAddress || '合约地址加载中...'}
               </Box>
               
               <Button 
                 variant="outlined" 
-                startIcon={<DescriptionIcon />}
+                startIcon={<OpenInNewIcon />}
                 fullWidth
                 sx={{ borderRadius: 2 }}
+                onClick={() => handleViewOnBlockchain()}
               >
                 查看区块链记录
               </Button>

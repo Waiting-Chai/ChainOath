@@ -205,6 +205,7 @@ export class ContractService {
     description: string;
     committers: string[];
     supervisors: string[];
+    totalReward: string;
     committerStakeAmount: string;
     supervisorStakeAmount: string;
     duration: number;
@@ -227,7 +228,7 @@ export class ContractService {
       // 将用户输入的金额转换为wei单位
       const committerStakeWei = ethers.parseUnits(oathData.committerStakeAmount, decimals);
       const supervisorStakeWei = ethers.parseUnits(oathData.supervisorStakeAmount, decimals);
-      const totalRewardWei = committerStakeWei + supervisorStakeWei; // 简化：总奖励 = 质押金额总和
+      const totalRewardWei = ethers.parseUnits(oathData.totalReward, decimals); // 奖励池金额，由创建者支付
       
       // 获取创建者地址（非空）
       const creator = await this.signer.getAddress();
@@ -290,11 +291,14 @@ export class ContractService {
       console.log('授权足够?', allowance >= contractOathData.totalReward);
       console.log('========================');
       
-      // 监听DebugLog事件
-      const debugFilter = this.chainOathContract.filters.DebugLog();
-      this.chainOathContract.on(debugFilter, (message, step) => {
-        console.log(`🔍 合约调试日志 [步骤${step}]: ${message}`);
-      });
+      // 检查余额是否足够
+      if (balance < contractOathData.totalReward) {
+        throw new Error(`代币余额不足！需要 ${ethers.formatUnits(contractOathData.totalReward, decimals)} ${await tokenContract.symbol()}，当前余额 ${ethers.formatUnits(balance, decimals)} ${await tokenContract.symbol()}`);
+      }
+      
+      if (allowance < contractOathData.totalReward) {
+        throw new Error(`代币授权额度不足！需要 ${ethers.formatUnits(contractOathData.totalReward, decimals)} ${await tokenContract.symbol()}，当前授权 ${ethers.formatUnits(allowance, decimals)} ${await tokenContract.symbol()}`);
+      }
       
       // 调用合约的 createOath 函数
       console.log('🚀 开始调用合约 createOath 函数...');
@@ -448,22 +452,24 @@ export class ContractService {
         throw new Error('ChainOath 合约未初始化');
       }
 
+      // 使用合约的getOath方法获取完整信息
       const oathInfo = await this.chainOathContract.getOath(oathId);
-      console.log('誓约信息:', oathInfo);
+      console.log('誓约完整信息:', oathInfo);
       
+      // 构造完整的誓约数据
       return {
         id: oathId,
-        title: oathInfo.title,
-        description: oathInfo.description,
-        committers: oathInfo.committers,
-        supervisors: oathInfo.supervisors,
-        committerStakeAmount: oathInfo.committerStakeAmount.toString(),
-        supervisorStakeAmount: oathInfo.supervisorStakeAmount.toString(),
-        tokenAddress: oathInfo.tokenAddress,
-        status: oathInfo.status,
-        creator: oathInfo.creator,
-        startTime: Number(oathInfo.startTime),
-        endTime: Number(oathInfo.endTime)
+        title: oathInfo.title || '',
+        description: oathInfo.description || '',
+        committers: oathInfo.committer ? [oathInfo.committer] : [], // 合约中committer是单个地址，转换为数组
+        supervisors: oathInfo.supervisors || [],
+        committerStakeAmount: oathInfo.committerStake ? oathInfo.committerStake.toString() : '0',
+        supervisorStakeAmount: oathInfo.supervisorStake ? oathInfo.supervisorStake.toString() : '0',
+        tokenAddress: oathInfo.token || '',
+        status: oathInfo.status || 0,
+        creator: oathInfo.creator || '',
+        startTime: oathInfo.startTime ? Number(oathInfo.startTime) : 0,
+        endTime: oathInfo.endTime ? Number(oathInfo.endTime) : 0
       };
     } catch (error) {
       console.error('获取誓约信息失败:', error);
@@ -540,10 +546,28 @@ export class ContractService {
         throw new Error('ChainOath 合约未初始化');
       }
 
-      const oaths = await this.chainOathContract.getUserCreatedOaths(userAddress);
-      console.log('用户创建的誓约:', oaths);
+      // 获取下一个誓约ID，用于确定遍历范围
+      const nextOathId = await this.chainOathContract.nextOathId();
+      const userOaths: OathData[] = [];
       
-      return oaths;
+      console.log(`开始查找用户 ${userAddress} 创建的誓约，总誓约数: ${nextOathId}`);
+      
+      // 遍历所有誓约ID，查找用户创建的誓约
+      for (let i = 0; i < nextOathId; i++) {
+        try {
+          const oathInfo = await this.getOath(i.toString());
+          if (oathInfo.creator.toLowerCase() === userAddress.toLowerCase()) {
+            userOaths.push(oathInfo);
+            console.log(`找到用户创建的誓约 ID: ${i}`);
+          }
+        } catch (error) {
+          console.warn(`获取誓约 ${i} 信息失败:`, error);
+          // 继续遍历其他誓约
+        }
+      }
+      
+      console.log('用户创建的誓约:', userOaths);
+      return userOaths;
     } catch (error) {
       console.error('获取用户创建的誓约失败:', error);
       throw error;
@@ -559,10 +583,28 @@ export class ContractService {
         throw new Error('ChainOath 合约未初始化');
       }
 
-      const oaths = await this.chainOathContract.getUserCommitterOaths(userAddress);
-      console.log('用户作为守约人的誓约:', oaths);
+      // 获取下一个誓约ID，用于确定遍历范围
+      const nextOathId = await this.chainOathContract.nextOathId();
+      const userOaths: OathData[] = [];
       
-      return oaths;
+      console.log(`开始查找用户 ${userAddress} 作为守约人的誓约，总誓约数: ${nextOathId}`);
+      
+      // 遍历所有誓约ID，查找用户作为守约人的誓约
+      for (let i = 0; i < nextOathId; i++) {
+        try {
+          const oathInfo = await this.getOath(i.toString());
+          if (oathInfo.committers.includes(userAddress.toLowerCase())) {
+            userOaths.push(oathInfo);
+            console.log(`找到用户作为守约人的誓约 ID: ${i}`);
+          }
+        } catch (error) {
+          console.warn(`获取誓约 ${i} 信息失败:`, error);
+          // 继续遍历其他誓约
+        }
+      }
+      
+      console.log('用户作为守约人的誓约:', userOaths);
+      return userOaths;
     } catch (error) {
       console.error('获取用户守约人誓约失败:', error);
       throw error;
@@ -578,10 +620,28 @@ export class ContractService {
         throw new Error('ChainOath 合约未初始化');
       }
 
-      const oaths = await this.chainOathContract.getUserSupervisorOaths(userAddress);
-      console.log('用户作为监督者的誓约:', oaths);
+      // 获取下一个誓约ID，用于确定遍历范围
+      const nextOathId = await this.chainOathContract.nextOathId();
+      const userOaths: OathData[] = [];
       
-      return oaths;
+      console.log(`开始查找用户 ${userAddress} 作为监督者的誓约，总誓约数: ${nextOathId}`);
+      
+      // 遍历所有誓约ID，查找用户作为监督者的誓约
+      for (let i = 0; i < nextOathId; i++) {
+        try {
+          const oathInfo = await this.getOath(i.toString());
+          if (oathInfo.supervisors.some(supervisor => supervisor.toLowerCase() === userAddress.toLowerCase())) {
+            userOaths.push(oathInfo);
+            console.log(`找到用户作为监督者的誓约 ID: ${i}`);
+          }
+        } catch (error) {
+          console.warn(`获取誓约 ${i} 信息失败:`, error);
+          // 继续遍历其他誓约
+        }
+      }
+      
+      console.log('用户作为监督者的誓约:', userOaths);
+      return userOaths;
     } catch (error) {
       console.error('获取用户监督者誓约失败:', error);
       throw error;
@@ -619,16 +679,40 @@ export class ContractService {
     isFailed: boolean;
     remainingTime: number;
     participantsStaked: boolean;
+    currentRound: number;
   }> {
     try {
       if (!this.chainOathContract) {
         throw new Error('ChainOath 合约未初始化');
       }
 
-      const statusInfo = await this.chainOathContract.getOathStatus(oathId);
-      console.log('誓约状态信息:', statusInfo);
+      // 通过getOath方法获取誓约信息
+      const oathInfo = await this.chainOathContract.getOath(oathId);
+      console.log('誓约状态信息:', oathInfo);
       
-      return statusInfo;
+      // 计算剩余时间
+      const currentTime = Math.floor(Date.now() / 1000);
+      const endTime = Number(oathInfo.endTime);
+      const remainingTime = Math.max(0, endTime - currentTime);
+      
+      // 根据状态判断各种状态
+      const status = Number(oathInfo.status);
+      const isActive = status === 1; // 假设1为活跃状态
+      const isCompleted = status === 2; // 假设2为完成状态
+      const isFailed = status === 3; // 假设3为失败状态
+      
+      // 检查参与者是否已质押（简化实现，可以后续优化）
+      const participantsStaked = true; // 暂时设为true，后续可以通过hasStaked方法检查
+      
+      return {
+        status,
+        isActive,
+        isCompleted,
+        isFailed,
+        remainingTime,
+        participantsStaked,
+        currentRound: 0
+      };
     } catch (error) {
       console.error('获取誓约状态失败:', error);
       throw error;
@@ -773,6 +857,211 @@ export class ContractService {
   }
 
   /**
+   * 获取监督者状态
+   */
+  async getSupervisorStatus(oathId: string, supervisorAddress: string): Promise<{
+    missCount: number;
+    successfulChecks: number;
+    isDisqualified: boolean;
+  }> {
+    try {
+      if (!this.chainOathContract) {
+        throw new Error('ChainOath 合约未初始化');
+      }
+
+      const status = await this.chainOathContract.getSupervisorStatus(oathId, supervisorAddress);
+      console.log(`监督者 ${supervisorAddress} 在誓约 ${oathId} 中的状态:`, status);
+      
+      return {
+        missCount: Number(status.missCount),
+        successfulChecks: Number(status.successfulChecks),
+        isDisqualified: status.isDisqualified
+      };
+    } catch (error) {
+      console.error('获取监督者状态失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取当前检查轮次
+   */
+  async getCurrentCheckRound(oathId: string): Promise<number> {
+    try {
+      if (!this.chainOathContract) {
+        throw new Error('ChainOath 合约未初始化');
+      }
+
+      const oathInfo = await this.chainOathContract.getOath(oathId);
+      const currentTime = Math.floor(Date.now() / 1000);
+      const startTime = Number(oathInfo.startTime);
+      const checkInterval = Number(oathInfo.checkInterval);
+      
+      if (currentTime < startTime) {
+        return 0; // 还未开始
+      }
+      
+      const elapsedTime = currentTime - startTime;
+      const currentRound = Math.floor(elapsedTime / checkInterval);
+      
+      return Math.max(0, currentRound);
+    } catch (error) {
+      console.error('获取当前检查轮次失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取下次检查时间和剩余时间
+   */
+  async getNextCheckTime(oathId: string): Promise<{
+    nextCheckTime: number;
+    timeUntilNextCheck: number;
+    timeUntilCheckWindowEnd: number;
+    isInCheckWindow: boolean;
+  }> {
+    try {
+      if (!this.chainOathContract) {
+        throw new Error('ChainOath 合约未初始化');
+      }
+
+      const oathInfo = await this.chainOathContract.getOath(oathId);
+      const currentTime = Math.floor(Date.now() / 1000);
+      const startTime = Number(oathInfo.startTime);
+      const checkInterval = Number(oathInfo.checkInterval);
+      const checkWindow = Number(oathInfo.checkWindow);
+      
+      if (currentTime < startTime) {
+        return {
+          nextCheckTime: startTime,
+          timeUntilNextCheck: startTime - currentTime,
+          timeUntilCheckWindowEnd: 0,
+          isInCheckWindow: false
+        };
+      }
+      
+      const elapsedTime = currentTime - startTime;
+      const currentRound = Math.floor(elapsedTime / checkInterval);
+      const nextCheckTime = startTime + (currentRound + 1) * checkInterval;
+      const checkWindowEndTime = nextCheckTime + checkWindow;
+      
+      const isInCheckWindow = currentTime >= nextCheckTime && currentTime <= checkWindowEndTime;
+      
+      return {
+        nextCheckTime,
+        timeUntilNextCheck: Math.max(0, nextCheckTime - currentTime),
+        timeUntilCheckWindowEnd: Math.max(0, checkWindowEndTime - currentTime),
+        isInCheckWindow
+      };
+    } catch (error) {
+      console.error('获取下次检查时间失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 计算监督者预期收益
+   */
+  async calculateSupervisorReward(oathId: string): Promise<string> {
+    try {
+      if (!this.chainOathContract) {
+        throw new Error('ChainOath 合约未初始化');
+      }
+
+      const oathInfo = await this.chainOathContract.getOath(oathId);
+      const totalReward = oathInfo.totalReward;
+      const supervisorRewardRatio = Number(oathInfo.supervisorRewardRatio);
+      const supervisorsCount = oathInfo.supervisors.length;
+      
+      if (supervisorsCount === 0) {
+        return '0';
+      }
+      
+      // 监督者总奖励 = 总奖励 * 监督者奖励比例 / 100
+      const supervisorTotalReward = totalReward * BigInt(supervisorRewardRatio) / BigInt(100);
+      // 单个监督者奖励 = 监督者总奖励 / 监督者数量
+      const singleSupervisorReward = supervisorTotalReward / BigInt(supervisorsCount);
+      
+      return singleSupervisorReward.toString();
+    } catch (error) {
+      console.error('计算监督者收益失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取平台统计数据
+   */
+  async getPlatformStats(): Promise<{
+    totalOaths: number;
+    activeOaths: number;
+    completedOaths: number;
+    successRate: string;
+    totalUsers: number;
+  }> {
+    try {
+      if (!this.chainOathContract) {
+        throw new Error('合约未初始化');
+      }
+
+      // 获取总誓约数
+      const nextOathId = await this.chainOathContract.nextOathId();
+      const totalOaths = Number(nextOathId);
+      
+      let activeOaths = 0;
+      let completedOaths = 0;
+      const uniqueUsers = new Set<string>();
+      
+      // 遍历所有誓约获取统计信息
+      for (let i = 0; i < totalOaths; i++) {
+        try {
+          const oathInfo = await this.getOath(i.toString());
+          
+          // 统计用户
+          uniqueUsers.add(oathInfo.creator.toLowerCase());
+          oathInfo.committers.forEach(addr => uniqueUsers.add(addr.toLowerCase()));
+          oathInfo.supervisors.forEach(addr => uniqueUsers.add(addr.toLowerCase()));
+          
+          // 统计誓约状态
+          const status = oathInfo.status;
+          if (status === 1) { // 活跃状态
+            activeOaths++;
+          } else if (status === 2) { // 完成状态
+            completedOaths++;
+          }
+        } catch {
+           // 跳过无效的誓约
+           continue;
+         }
+      }
+      
+      // 计算成功率
+      const totalFinishedOaths = completedOaths + (totalOaths - activeOaths - completedOaths);
+      const successRate = totalFinishedOaths > 0 
+        ? ((completedOaths / totalFinishedOaths) * 100).toFixed(1)
+        : '0.0';
+      
+      return {
+        totalOaths,
+        activeOaths,
+        completedOaths,
+        successRate,
+        totalUsers: uniqueUsers.size
+      };
+    } catch (error) {
+      console.error('获取平台统计数据失败:', error);
+      // 返回默认值
+      return {
+        totalOaths: 0,
+        activeOaths: 0,
+        completedOaths: 0,
+        successRate: '0.0',
+        totalUsers: 0
+      };
+    }
+  }
+
+  /**
    * 检查代币是否在白名单中
    */
   async isTokenWhitelisted(tokenAddress: string): Promise<boolean> {
@@ -781,7 +1070,54 @@ export class ContractService {
         throw new Error('合约未初始化');
       }
 
-      return await this.chainOathContract.tokenWhitelist(tokenAddress);
+      console.log('🔍 检查代币白名单状态:');
+      console.log('- 合约地址:', this.chainOathContract.target);
+      console.log('- 代币地址:', tokenAddress);
+      
+      // 尝试多种方式获取白名单状态
+      try {
+        // 方式1: 直接调用合约方法
+        const result1 = await this.chainOathContract.tokenWhitelist(tokenAddress);
+        console.log('- 方式1结果:', result1);
+        
+        // 方式2: 使用staticCall
+        const result2 = await this.chainOathContract.tokenWhitelist.staticCall(tokenAddress);
+        console.log('- 方式2结果:', result2);
+        
+        // 方式3: 重新创建合约实例
+         const freshContract = new ethers.Contract(
+           this.chainOathContract.target as string,
+           ChainOathSecureABI,
+           this.provider!
+         );
+        const result3 = await freshContract.tokenWhitelist(tokenAddress);
+        console.log('- 方式3结果:', result3);
+        
+        // 方式4: 使用自定义RPC端点
+        try {
+          const customProvider = new ethers.JsonRpcProvider('https://sepolia.drpc.org');
+          const customContract = new ethers.Contract(
+            this.chainOathContract.target as string,
+            ChainOathSecureABI,
+            customProvider
+          );
+          const result4 = await customContract.tokenWhitelist(tokenAddress);
+          console.log('- 方式4结果(自定义RPC):', result4);
+          
+          // 如果自定义RPC返回true，说明链上数据是正确的，问题在于MetaMask的RPC
+          if (result4 && !result1) {
+            console.warn('⚠️ MetaMask RPC数据可能未同步，建议切换RPC端点或等待同步');
+            return result4; // 使用自定义RPC的结果
+          }
+        } catch (rpcError) {
+          console.warn('自定义RPC检查失败:', rpcError);
+        }
+        
+        return result3;
+      } catch (callError) {
+        console.error('合约调用失败:', callError);
+        return false;
+      }
     } catch (error) {
       console.error('检查代币白名单状态失败:', error);
       throw error;
