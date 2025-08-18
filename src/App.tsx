@@ -8,7 +8,7 @@ import Error from './pages/Error';
 import MyOaths from './pages/MyOaths';
 import OathDetail from './pages/OathDetail';
 import StakeParticipation from './pages/StakeParticipation';
-import AdminPanel from './pages/AdminPanel';
+import AdminPanel from "./pages/AdminPanel";
 
 function App() {
   return (

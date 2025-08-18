@@ -12,6 +12,13 @@ class PublicContractService {
     return this.contractAddress;
   }
 
+  // 重置服务状态，强制重新初始化
+  public reset(): void {
+    this.provider = null;
+    this.contract = null;
+    this.contractAddress = null;
+  }
+
   private rpcMap: Record<string, string> = {
     sepolia: 'https://ethereum-sepolia-rpc.publicnode.com',
     mainnet: 'https://ethereum-rpc.publicnode.com',

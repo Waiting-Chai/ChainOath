@@ -210,6 +210,8 @@ export class ContractService {
     supervisorStakeAmount: string;
     duration: number;
     penaltyRate: number;
+    startTime: number;
+    endTime: number;
   }, tokenAddress: string): Promise<{ tx: ethers.TransactionResponse, oathId: string }> {
     try {
       if (!this.chainOathContract) {
@@ -249,8 +251,8 @@ export class ContractService {
         maxSupervisorMisses: 3,     // 固定：最多错过3次
         maxCommitterFailures: 2,    // 固定：最多失败2次
         checkRoundsCount: oathData.duration, // 检查轮数等于天数
-        startTime: Math.floor(Date.now() / 1000) + 300, // 当前时间 + 5分钟
-        endTime: Math.floor(Date.now() / 1000) + 300 + (oathData.duration * 86400), // 结束时间
+        startTime: oathData.startTime, // 使用前端传入的开始时间
+        endTime: oathData.endTime, // 使用前端传入的结束时间
         createTime: Math.floor(Date.now() / 1000), // 创建时间
         creator,
         token: tokenAddress,
@@ -357,6 +359,32 @@ export class ContractService {
       const amountWei = ethers.parseUnits(amount, decimals);
       
       console.log(`守约人质押: 誓约ID ${oathId}, 金额 ${amount}`);
+      
+      // 添加详细的状态检查
+      console.log('=== 守约人质押前状态检查 ===');
+      console.log('誓约状态:', oathInfo.status.toString());
+      console.log('开始时间:', oathInfo.startTime.toString());
+      console.log('当前区块时间戳:', Math.floor(Date.now() / 1000));
+      console.log('时间差:', Math.floor(Date.now() / 1000) - Number(oathInfo.startTime), '秒');
+      
+      const userAddress = await this.getCurrentAddress();
+      console.log('当前用户地址:', userAddress);
+      console.log('守约人地址:', oathInfo.committer);
+      console.log('地址匹配:', userAddress?.toLowerCase() === oathInfo.committer.toLowerCase());
+      
+      // 检查是否已经质押
+      const hasStaked = await this.chainOathContract.committerStakes(oathId, userAddress);
+      console.log('是否已质押:', hasStaked.hasStaked);
+      
+      // 检查代币余额和授权
+      const balance = await tokenContract.balanceOf(userAddress);
+      const allowance = await tokenContract.allowance(userAddress, await this.chainOathContract.getAddress());
+      console.log('代币余额 (wei):', balance.toString());
+      console.log('授权额度 (wei):', allowance.toString());
+      console.log('需要金额 (wei):', amountWei.toString());
+      console.log('余额足够:', balance >= amountWei);
+      console.log('授权足够:', allowance >= amountWei);
+      console.log('========================');
       
       const tx = await this.chainOathContract.committerStake(oathId, amountWei);
       
@@ -493,6 +521,66 @@ export class ContractService {
     } catch (error) {
       console.error('检查质押状态失败:', error);
       throw error;
+    }
+  }
+
+  /**
+   * 检查用户作为守约人是否已质押
+   */
+  async hasCommitterStaked(oathId: string, userAddress: string): Promise<boolean> {
+    try {
+      if (!this.chainOathContract) {
+        throw new Error('ChainOath 合约未初始化');
+      }
+
+      // 获取誓约信息
+      const oathInfo = await this.chainOathContract.getOath(oathId);
+      
+      // 检查用户是否是守约人
+      if (oathInfo.committer.toLowerCase() !== userAddress.toLowerCase()) {
+        return false;
+      }
+
+      // 检查守约人是否已质押
+      const hasStaked = await this.chainOathContract.hasStaked(oathId, userAddress);
+      console.log(`守约人 ${userAddress} 在誓约 ${oathId} 中的质押状态:`, hasStaked);
+      
+      return hasStaked;
+    } catch (error) {
+      console.error('检查守约人质押状态失败:', error);
+      return false;
+    }
+  }
+
+  /**
+   * 检查用户作为监督者是否已质押
+   */
+  async hasSupervisorStaked(oathId: string, userAddress: string): Promise<boolean> {
+    try {
+      if (!this.chainOathContract) {
+        throw new Error('ChainOath 合约未初始化');
+      }
+
+      // 获取誓约信息
+      const oathInfo = await this.chainOathContract.getOath(oathId);
+      
+      // 检查用户是否是监督者
+      const isSupervisor = oathInfo.supervisors.some(
+        (supervisor: string) => supervisor.toLowerCase() === userAddress.toLowerCase()
+      );
+      
+      if (!isSupervisor) {
+        return false;
+      }
+
+      // 检查监督者是否已质押
+      const hasStaked = await this.chainOathContract.hasStaked(oathId, userAddress);
+      console.log(`监督者 ${userAddress} 在誓约 ${oathId} 中的质押状态:`, hasStaked);
+      
+      return hasStaked;
+    } catch (error) {
+      console.error('检查监督者质押状态失败:', error);
+      return false;
     }
   }
 
@@ -1141,6 +1229,170 @@ export class ContractService {
     } catch (error) {
       console.error('更新代币白名单失败:', error);
       throw error;
+    }
+  }
+
+  /**
+   * 申请退款（仅在誓约被废止时）
+   */
+  async refundStake(oathId: string): Promise<ethers.TransactionResponse> {
+    try {
+      if (!this.chainOathContract) {
+        throw new Error('合约未初始化');
+      }
+
+      // 获取当前用户地址
+      const currentAddress = await this.getCurrentAddress();
+      if (!currentAddress) {
+        throw new Error('请先连接钱包');
+      }
+
+      // 检查是否可以退款
+      const canRefund = await this.canRefund(oathId, currentAddress);
+      if (!canRefund) {
+        throw new Error('当前状态不允许退款');
+      }
+
+      // 检查用户是否有质押
+      const hasStaked = await this.hasStaked(oathId, currentAddress);
+      if (!hasStaked) {
+        throw new Error('您没有在此誓约中质押');
+      }
+
+      console.log(`申请退款: 誓约ID ${oathId}, 用户地址 ${currentAddress}`);
+      const tx = await this.chainOathContract.refundStake(oathId);
+      
+      console.log('退款交易已提交:', tx.hash);
+      return tx;
+    } catch (error) {
+      console.error('申请退款失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 领取奖励
+   */
+  async claimReward(oathId: string): Promise<ethers.TransactionResponse> {
+    try {
+      if (!this.chainOathContract) {
+        throw new Error('合约未初始化');
+      }
+
+      console.log(`领取奖励: 誓约ID ${oathId}`);
+      const tx = await this.chainOathContract.claimReward(oathId);
+      
+      console.log('领取奖励交易已提交:', tx.hash);
+      return tx;
+    } catch (error) {
+      console.error('领取奖励失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 撤回合约（仅创建者在特定条件下可用）
+   */
+  async withdrawOath(oathId: string): Promise<ethers.TransactionResponse> {
+    try {
+      if (!this.chainOathContract) {
+        throw new Error('合约未初始化');
+      }
+
+      // 获取当前用户地址
+      const currentAddress = await this.getCurrentAddress();
+      if (!currentAddress) {
+        throw new Error('请先连接钱包');
+      }
+
+      // 检查誓约信息
+      const oathInfo = await this.getOath(oathId);
+      
+      // 验证是否为创建者
+      if (oathInfo.creator.toLowerCase() !== currentAddress.toLowerCase()) {
+        throw new Error('只有创建者可以撤回誓约');
+      }
+
+      // 检查誓约状态，只有在Pending状态下才能撤回
+      if (oathInfo.status !== 0) { // 0 = Pending
+        throw new Error('只有在待接受状态下才能撤回誓约');
+      }
+
+      console.log(`撤回誓约: 誓约ID ${oathId}`);
+      // 调用合约的撤回方法（如果合约有专门的撤回方法）
+      // 这里假设合约有withdrawOath方法，如果没有则使用checkOathStatus
+      const tx = await this.chainOathContract.withdrawOath ? 
+        await this.chainOathContract.withdrawOath(oathId) :
+        await this.chainOathContract.checkOathStatus(oathId);
+      
+      console.log('撤回誓约交易已提交:', tx.hash);
+      return tx;
+    } catch (error) {
+      console.error('撤回誓约失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 更新进度（守约人）
+   */
+  async updateProgress(oathId: string): Promise<ethers.TransactionResponse> {
+    try {
+      if (!this.chainOathContract) {
+        throw new Error('合约未初始化');
+      }
+
+      console.log(`更新进度: 誓约ID ${oathId}`);
+      // 这里可以扩展为实际的进度更新逻辑
+      // 目前先返回一个占位符交易
+      throw new Error('进度更新功能待实现');
+    } catch (error) {
+      console.error('更新进度失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 检查用户是否可以申请退款
+   */
+  async canRefund(oathId: string, userAddress: string): Promise<boolean> {
+    try {
+      const oathInfo = await this.getOath(oathId);
+      
+      // 只有在誓约被废止(Aborted)状态下才能退款
+      if (oathInfo.status !== 3) { // 3 = Aborted
+        return false;
+      }
+
+      // 检查用户是否有质押
+      const hasStaked = await this.hasStaked(oathId, userAddress);
+      return hasStaked;
+    } catch (error) {
+      console.error('检查退款权限失败:', error);
+      return false;
+    }
+  }
+
+  /**
+   * 检查用户是否可以领取奖励
+   */
+  async canClaimReward(oathId: string, userAddress: string): Promise<boolean> {
+    try {
+      const oathInfo = await this.getOath(oathId);
+      
+      // 只有在誓约完成(Fulfilled)或失败(Broken)状态下才能领取奖励
+      if (oathInfo.status !== 2 && oathInfo.status !== 4) { // 2 = Fulfilled, 4 = Broken
+        return false;
+      }
+
+      // 检查用户是否有质押或是创建者
+      const hasStaked = await this.hasStaked(oathId, userAddress);
+      const isCreator = oathInfo.creator.toLowerCase() === userAddress.toLowerCase();
+      
+      return hasStaked || isCreator;
+    } catch (error) {
+      console.error('检查奖励领取权限失败:', error);
+      return false;
     }
   }
 }

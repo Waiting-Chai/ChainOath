@@ -11,7 +11,7 @@ export const CONTRACT_CONFIG = {
   sepolia: {
     chainId: 11155111,
     chainName: 'Sepolia Testnet',
-    chainOathAddress: import.meta.env.VITE_SEPOLIA_CONTRACT_ADDRESS || '0x0000000000000000000000000000000000000000', // ChainOath 主合约地址 (需要部署)
+    chainOathAddress: import.meta.env.VITE_SEPOLIA_CONTRACT_ADDRESS || '0x8DF221De9e8f3C890DC3072f7f8d07A1B5910fcD', // ChainOath 主合约地址 (已部署)
     blockExplorer: 'https://sepolia.etherscan.io'
   },
   // 本地开发网络

@@ -150,8 +150,7 @@ contract ChainOathSecure is ReentrancyGuard, Ownable, Pausable {
         require(_oath.committer != address(0), "Invalid committer address");
         emit DebugLog("Committer address check passed", 4);
         
-        require(_oath.committer != msg.sender, "Creator cannot be committer");
-        emit DebugLog("Creator-committer check passed", 5);
+        // require(_oath.committer != msg.sender, "Creator cannot be committer"); // 允许创建者是守约人
         
         require(_oath.totalReward >= MIN_STAKE_AMOUNT, "Total reward too small");
         emit DebugLog("Total reward amount check passed", 6);
@@ -211,11 +210,11 @@ contract ChainOathSecure is ReentrancyGuard, Ownable, Pausable {
             emit DebugLog("Supervisor address check passed", 14 + i * 4);
             
             // 已移除创建者和守约人不能是监督者的限制
-            require(supervisor != msg.sender, "Creator cannot be supervisor");
-            emit DebugLog("Creator-supervisor check passed", 15 + i * 4);
+            // require(supervisor != msg.sender, "Creator cannot be supervisor"); // 允许创建者是监督者
+            // emit DebugLog("Creator-supervisor check passed", 15 + i * 4);
             
-            require(supervisor != _oath.committer, "Committer cannot be supervisor");
-            emit DebugLog("Committer-supervisor check passed", 16 + i * 4);
+            // require(supervisor != _oath.committer, "Committer cannot be supervisor"); // 允许守约人是监督者
+            // emit DebugLog("Committer-supervisor check passed", 16 + i * 4);
             
             // 检查重复地址
             for (uint j = i + 1; j < _oath.supervisors.length; j++) {

@@ -51,7 +51,7 @@ interface OathDetailData {
   id: string;
   title: string;
   description: string;
-  status: 'active' | 'completed' | 'failed';
+  status: 'pending' | 'active' | 'completed' | 'failed' | 'aborted';
   progress: number;
   startDate: string;
   deadline: string;
@@ -199,37 +199,50 @@ const OathDetail: React.FC = () => {
           const currentUser = accounts?.[0] || '';
           setUserAddress(currentUser.toLowerCase());
 
-          // 检查见证人质押状态
-          const witnessesData = [
-            {
-              address: oathData.creator,
-              role: 'creator' as const,
-              name: oathData.creator.slice(0, 6) + '...' + oathData.creator.slice(-4)
-            },
-            ...(oathData.supervisors || []).map((supervisor: string) => ({
-              address: supervisor,
-              role: 'supervisor' as const,
-              name: supervisor.slice(0, 6) + '...' + supervisor.slice(-4)
-            }))
-          ];
+          // 检查见证人质押状态 - 分别处理创建者和监督者角色
+          const witnessesData = [];
+          
+          // 添加创建者（作为守约人）
+           try {
+             const creatorStaked = await contractService.hasCommitterStaked(id, oathData.creator);
+             witnessesData.push({
+               address: oathData.creator,
+               role: 'creator' as const,
+               name: oathData.creator.slice(0, 6) + '...' + oathData.creator.slice(-4),
+               status: creatorStaked ? 'staked' : 'not_staked' as 'staked' | 'not_staked'
+             });
+           } catch (err) {
+             console.error('检查创建者质押状态失败:', err);
+             witnessesData.push({
+               address: oathData.creator,
+               role: 'creator' as const,
+               name: oathData.creator.slice(0, 6) + '...' + oathData.creator.slice(-4),
+               status: 'not_staked' as 'staked' | 'not_staked'
+             });
+           }
+          
+          // 添加所有监督者（包括创建者如果他也是监督者）
+          for (const supervisor of (oathData.supervisors || [])) {
+            try {
+              const supervisorStaked = await contractService.hasSupervisorStaked(id, supervisor);
+              witnessesData.push({
+                address: supervisor,
+                role: 'supervisor' as const,
+                name: supervisor.slice(0, 6) + '...' + supervisor.slice(-4),
+                status: supervisorStaked ? 'staked' : 'not_staked' as 'staked' | 'not_staked'
+              });
+            } catch (err) {
+              console.error('检查监督者质押状态失败:', err);
+              witnessesData.push({
+                address: supervisor,
+                role: 'supervisor' as const,
+                name: supervisor.slice(0, 6) + '...' + supervisor.slice(-4),
+                status: 'not_staked' as 'staked' | 'not_staked'
+              });
+            }
+          }
 
-          const witnessesWithStakeStatus = await Promise.all(
-            witnessesData.map(async (witness) => {
-              try {
-                const hasStaked = await contractService.hasStaked(id, witness.address);
-                return {
-                  ...witness,
-                  status: hasStaked ? 'staked' : 'not_staked' as 'staked' | 'not_staked'
-                };
-              } catch (err) {
-                console.error('检查质押状态失败:', err);
-                return {
-                  ...witness,
-                  status: 'not_staked' as 'staked' | 'not_staked'
-                };
-              }
-            })
-          );
+          const witnessesWithStakeStatus = witnessesData;
 
          // 动态计算检查点
           const checkpoints = calculateCheckpoints({
@@ -321,6 +334,92 @@ const OathDetail: React.FC = () => {
     const networkConfig = getCurrentNetworkConfig();
     const explorerUrl = `${networkConfig.blockExplorer}/address/${networkConfig.chainOathAddress}`;
     window.open(explorerUrl, '_blank');
+  };
+
+  // 撤回合约（创建者）
+  const handleWithdrawOath = async () => {
+    if (!id || !oath) return;
+    
+    try {
+      setLoading(true);
+      await contractService.withdrawOath(id);
+      alert('合约撤回成功！');
+      // 重新加载数据
+      window.location.reload();
+    } catch (error) {
+       console.error('撤回合约失败:', error);
+       alert(`撤回合约失败: ${error instanceof Error ? error.message : '未知错误'}`);
+     } finally {
+      setLoading(false);
+    }
+  };
+
+  // 申请退款（受约人和监督者）
+  const handleRefundStake = async () => {
+    if (!id || !oath) return;
+    
+    try {
+      // 检查是否可以退款
+      const canRefund = await contractService.canRefund(id, userAddress);
+      if (!canRefund) {
+        alert('当前状态不允许退款');
+        return;
+      }
+      
+      setLoading(true);
+      await contractService.refundStake(id);
+      alert('退款申请成功！');
+      // 重新加载数据
+      window.location.reload();
+    } catch (error) {
+       console.error('申请退款失败:', error);
+       alert(`申请退款失败: ${error instanceof Error ? error.message : '未知错误'}`);
+     } finally {
+      setLoading(false);
+    }
+  };
+
+  // 领取奖励（受约人和监督者）
+  const handleClaimReward = async () => {
+    if (!id || !oath) return;
+    
+    try {
+      // 检查是否可以领取奖励
+      const canClaim = await contractService.canClaimReward(id, userAddress);
+      if (!canClaim) {
+        alert('当前状态不允许领取奖励');
+        return;
+      }
+      
+      setLoading(true);
+      await contractService.claimReward(id);
+      alert('奖励领取成功！');
+      // 重新加载数据
+      window.location.reload();
+    } catch (error) {
+       console.error('领取奖励失败:', error);
+       alert(`领取奖励失败: ${error instanceof Error ? error.message : '未知错误'}`);
+     } finally {
+      setLoading(false);
+    }
+  };
+
+  // 更新进度（受约人）
+  const handleUpdateProgress = async () => {
+    if (!id || !oath) return;
+    
+    try {
+      setLoading(true);
+      await contractService.updateProgress(id);
+      alert('进度更新成功！');
+      // 重新加载数据
+      window.location.reload();
+    } catch (error) {
+       console.error('更新进度失败:', error);
+       alert(`更新进度失败: ${error instanceof Error ? error.message : '未知错误'}`);
+     } finally {
+      setLoading(false);
+    }
   };
 
   if (loading) {
@@ -519,24 +618,40 @@ const OathDetail: React.FC = () => {
                 {/* 创建者操作 */}
                 {userAddress && oath.creator.address.toLowerCase() === userAddress && (
                   <>
-                    {oath.status === 'active' && (
+                    {/* 只有在待接受状态下才能撤回合约 */}
+                    {oath.status === 'pending' && (
                       <Button 
                         variant="contained" 
                         color="error" 
-                        startIcon={<AccountBalanceIcon />}
+                        startIcon={<CancelIcon />}
                         sx={{ borderRadius: 2 }}
+                        onClick={handleWithdrawOath}
                       >
                         撤回合约
                       </Button>
                     )}
+                    {/* 合约完成或失败后可以结算收益 */}
                     {(oath.status === 'completed' || oath.status === 'failed') && (
                       <Button 
                         variant="contained" 
                         color="success" 
                         startIcon={<MonetizationOnIcon />}
                         sx={{ borderRadius: 2 }}
+                        onClick={handleClaimReward}
                       >
                         结算收益
+                      </Button>
+                    )}
+                    {/* 合约被废止后可以申请退款 */}
+                    {oath.status === 'aborted' && (
+                      <Button 
+                        variant="outlined" 
+                        color="warning" 
+                        startIcon={<AccountBalanceIcon />}
+                        sx={{ borderRadius: 2 }}
+                        onClick={handleRefundStake}
+                      >
+                        申请退款
                       </Button>
                     )}
                   </>
@@ -550,6 +665,7 @@ const OathDetail: React.FC = () => {
                         variant="outlined" 
                         color="primary" 
                         sx={{ borderRadius: 2 }}
+                        onClick={handleUpdateProgress}
                       >
                         更新进度
                       </Button>
@@ -560,18 +676,23 @@ const OathDetail: React.FC = () => {
                         color="success" 
                         startIcon={<MonetizationOnIcon />}
                         sx={{ borderRadius: 2 }}
+                        onClick={handleClaimReward}
                       >
                         领取奖励
                       </Button>
                     )}
-                    <Button 
-                      variant="outlined" 
-                      color="warning" 
-                      startIcon={<AccountBalanceIcon />}
-                      sx={{ borderRadius: 2 }}
-                    >
-                      申请退款
-                    </Button>
+                    {/* 只有在合约被废止状态下才能申请退款 */}
+                    {oath.status === 'aborted' && (
+                      <Button 
+                        variant="outlined" 
+                        color="warning" 
+                        startIcon={<AccountBalanceIcon />}
+                        sx={{ borderRadius: 2 }}
+                        onClick={handleRefundStake}
+                      >
+                        申请退款
+                      </Button>
+                    )}
                   </>
                 )}
                 
@@ -584,18 +705,11 @@ const OathDetail: React.FC = () => {
                         color="success" 
                         startIcon={<MonetizationOnIcon />}
                         sx={{ borderRadius: 2 }}
+                        onClick={handleClaimReward}
                       >
                         领取奖励
                       </Button>
                     )}
-                    <Button 
-                      variant="outlined" 
-                      color="warning" 
-                      startIcon={<AccountBalanceIcon />}
-                      sx={{ borderRadius: 2 }}
-                    >
-                      申请退款
-                    </Button>
                   </>
                 )}
                 

@@ -84,7 +84,7 @@ cp .env.example .env
 VITE_NETWORK=sepolia  # 可选: mainnet, sepolia, localhost
 
 # Sepolia 测试网 - 单一主合约地址
-VITE_SEPOLIA_CONTRACT_ADDRESS=0x5fA4C99f599E246757e6b5b6Fb9cD3B894D1331b
+VITE_SEPOLIA_CONTRACT_ADDRESS=0x8DF221De9e8f3C890DC3072f7f8d07A1B5910fcD
 ```
 
 3. **网络说明**
@@ -101,12 +101,12 @@ VITE_SEPOLIA_CONTRACT_ADDRESS=0x5fA4C99f599E246757e6b5b6Fb9cD3B894D1331b
 
 ### Sepolia 测试网部署
 
-**合约地址**: `0x5fA4C99f599E246757e6b5b6Fb9cD3B894D1331b`
-**部署交易**: `0x28e03776569cf3696cadbf4d89af29209bdc8cfddf1b2d5f9f19764e1cad79aa`
-**部署区块**: `8960243`
+**合约地址**: `0x8DF221De9e8f3C890DC3072f7f8d07A1B5910fcD`
+**部署交易**: `0x15f60d028145d7e7c1bcaf87c99f1f85b8afed2c5fa5fe0c209d664fc89ca739`
+**部署区块**: `8972397`
 **网络**: Sepolia Testnet (Chain ID: 11155111)
-**Gas 费用**: 0.000006788287071236 ETH
-**区块浏览器**: [查看合约](https://sepolia.etherscan.io/address/0x5fA4C99f599E246757e6b5b6Fb9cD3B894D1331b)
+**Gas 费用**: 0.000029667698948729 ETH
+**区块浏览器**: [查看合约](https://sepolia.etherscan.io/address/0x8DF221De9e8f3C890DC3072f7f8d07A1B5910fcD)
 
 ### 合约验证
 
@@ -170,6 +170,12 @@ contract ChainOathSecure {
 | **守约人 Committer** | 接受任务，履行誓约，被监督者评定 | 是（履约押金，可配置） | 是（完成时获得奖励） | 是（是否守约） |
 | **监督者 Supervisor** | 定期进行检查并提交评定，监督守约人行为 | 是（监督押金，可配置） | 是（按成功检查次数） | 是（监督决定） |
 | **查看者 Viewer** | 仅查看誓约详情与状态 | 否 | 否 | 否 |
+
+**角色兼任说明**：
+- ✅ **创建者可以同时担任守约人**：允许用户为自己创建自律性誓约
+- ✅ **创建者可以同时担任监督者**：允许创建者参与监督过程
+- ✅ **守约人可以同时担任监督者**：允许更灵活的角色分配
+- ⚠️ **注意**：同一地址担任多个角色时，需要分别完成各角色的质押要求
 
 ### 核心数据结构
 

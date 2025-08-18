@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Link as RouterLink, useNavigate } from "react-router-dom";
 import BigNumber from "bignumber.js";
 import { contractService } from "../services/contractService";
-import { notificationService } from "../services/notificationService";
+import { enhancedXmtpService } from '../services/enhancedXmtpService';
 import { getCurrentNetworkConfig, getCurrentTestTokens } from "../contracts/config";
 import {
   AppBar,
@@ -215,12 +215,6 @@ const CreateOath: React.FC = () => {
         return;
     }
 
-    // 新增：守约人地址不能与任何监督者重复
-    if (formData.supervisors.some(addr => addr.toLowerCase() === formData.committer.toLowerCase())) {
-      alert("守约人地址不能与监督者地址相同");
-      return;
-    }
-
     if (
       !formData.tokenAddress ||
       formData.tokenAddress.length !== 42 ||
@@ -293,6 +287,8 @@ const CreateOath: React.FC = () => {
           : formData.supervisorStake.toString(),
         duration: Math.floor((endTimestamp - startTimestamp) / 86400), // 转换为天数
         penaltyRate: formData.supervisorRewardRatio, // 使用监督者奖励比例作为惩罚率
+        startTime: Math.floor(startTimestamp), // 开始时间戳
+        endTime: Math.floor(endTimestamp), // 结束时间戳
       };
 
       console.log("提交的誓约数据:", oathData);
@@ -428,30 +424,59 @@ const CreateOath: React.FC = () => {
         ...formData.supervisors,
       ].filter((addr) => addr !== userAddress);
 
-      // 发送誓约创建通知
-      await notificationService.sendOathCreatedNotification(
-        oathId,
-        formData.title,
-        allParticipants
-      );
-
-      // 发送质押提醒给守约者（如果不是创建者）
-      if (formData.committer.toLowerCase() !== userAddress.toLowerCase()) {
-        await notificationService.sendStakeReminderWithLink(
-          oathId,
-          formData.title,
-          [formData.committer],
-          "committer"
-        );
+      // 10. 初始化XMTP服务并发送通知
+      try {
+        console.log('初始化XMTP服务...');
+        const xmtpResult = await enhancedXmtpService.initializeXMTP();
+        
+        if (xmtpResult.success) {
+          console.log(xmtpResult.message);
+          
+          // 发送誓约创建通知给所有参与者
+          if (allParticipants.length > 0) {
+            console.log('发送誓约创建通知...');
+            const notificationResult = await enhancedXmtpService.sendOathCreatedNotification(
+              oathId,
+              formData.title,
+              allParticipants
+            );
+            
+            console.log(`通知发送结果: 成功 ${notificationResult.success.length} 个，失败 ${notificationResult.failed.length} 个`);
+            
+            if (notificationResult.failed.length > 0) {
+              console.warn('部分通知发送失败:', notificationResult.failed);
+            }
+          }
+          
+          // 发送质押提醒给守约者（如果不是创建者）
+          if (formData.committer.toLowerCase() !== userAddress.toLowerCase()) {
+            console.log('发送质押提醒给守约者...');
+            await enhancedXmtpService.sendStakeReminderNotification(
+              oathId,
+              formData.title,
+              [formData.committer],
+              'committer'
+            );
+          }
+          
+          // 发送质押提醒给监督者
+          if (formData.supervisors.length > 0) {
+            console.log('发送质押提醒给监督者...');
+            await enhancedXmtpService.sendStakeReminderNotification(
+              oathId,
+              formData.title,
+              formData.supervisors,
+              'supervisor'
+            );
+          }
+        } else {
+          console.warn('XMTP初始化失败:', xmtpResult.message);
+          alert(`XMTP通知服务初始化失败: ${xmtpResult.message}\n誓约创建成功，但无法发送通知`);
+        }
+      } catch (xmtpError) {
+        console.error('XMTP通知发送失败:', xmtpError);
+        // 不阻止誓约创建流程，只是警告用户
       }
-
-      // 发送质押提醒给监督者
-      await notificationService.sendStakeReminderWithLink(
-        oathId,
-        formData.title,
-        formData.supervisors,
-        "supervisor"
-      );
 
       // 11. 设置合约事件监听
       contractService.setupEventListeners({
@@ -469,11 +494,13 @@ const CreateOath: React.FC = () => {
         onOathAccepted: (oathId: string) => {
           console.log("监听到誓约接受事件:", oathId);
           // 发送誓约激活通知
-          notificationService.sendOathActivatedNotification(
+          enhancedXmtpService.sendOathCreatedNotification(
             oathId,
             formData.title,
             allParticipants
-          );
+          ).catch(error => {
+            console.error('发送誓约激活通知失败:', error);
+          });
         },
       });
 

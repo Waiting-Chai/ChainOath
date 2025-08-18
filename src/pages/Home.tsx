@@ -72,7 +72,19 @@ const Home: React.FC = () => {
 
   React.useEffect(() => {
     let mounted = true;
-    const loadRecent = async () => {
+    
+    const initializeAndLoad = async () => {
+      try {
+        // 强制重置并重新初始化服务，确保使用最新的合约配置
+        publicContractService.reset();
+        await publicContractService.initialize();
+        console.log("使用合约地址:", publicContractService.getContractAddress());
+      } catch (error) {
+        console.error("初始化公共合约服务失败:", error);
+        return;
+      }
+      
+      // 加载最近誓约
       try {
         setLoadingOaths(true);
         const data = await publicContractService.getRecentOaths(10);
@@ -98,9 +110,8 @@ const Home: React.FC = () => {
       } finally {
         if (mounted) setLoadingOaths(false);
       }
-    };
-
-    const loadPlatformStats = async () => {
+      
+      // 加载平台统计
       try {
         setLoadingStats(true);
         const stats = await publicContractService.getPlatformStats();
@@ -116,8 +127,7 @@ const Home: React.FC = () => {
       }
     };
 
-    loadRecent();
-    loadPlatformStats();
+    initializeAndLoad();
 
     return () => {
       mounted = false;
@@ -270,6 +280,9 @@ const Home: React.FC = () => {
             </Button>
             <Button color="inherit" sx={{ mx: 1 }}>
               探索
+            </Button>
+            <Button color="inherit" sx={{ mx: 1 }} component={RouterLink} to="/notifications">
+              通知中心
             </Button>
             <Button color="inherit" sx={{ mx: 1 }}>
               文档
