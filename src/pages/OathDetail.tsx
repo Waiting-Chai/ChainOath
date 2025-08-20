@@ -35,6 +35,7 @@ import {
 import { contractService } from '../services/contractService';
 import { ethers } from 'ethers';
 import { getCurrentNetworkConfig } from '../contracts/config';
+import CountdownTimer from '../components/CountdownTimer';
 import {
   Star as StarIcon,
   Gavel as GavelIcon,
@@ -109,6 +110,8 @@ const OathDetail: React.FC = () => {
     timeUntilCheckWindowEnd: number;
     isInCheckWindow: boolean;
   } | null>(null);
+  const [stakingEndTime, setStakingEndTime] = useState<number | null>(null);
+  const [nextCheckEndTime, setNextCheckEndTime] = useState<number | null>(null);
 
   // 计算检查点
   const calculateCheckpoints = (oathData: {
@@ -302,7 +305,45 @@ const OathDetail: React.FC = () => {
 
         setOath(formattedOath);
 
-        // 如果当前用户是监督者，获取监督者状态
+        // 计算质押截止时间（合约开始时间）
+         const currentTime = Math.floor(Date.now() / 1000);
+         const contractStartTime = oathData.startTime;
+         
+         // 检查是否所有角色都已质押完成
+         const allStaked = witnessesWithStakeStatus.every(witness => witness.status === 'staked');
+         
+         // 只有在合约未开始、未结束且不是所有人都已质押时才显示质押倒计时
+         if (oathData.status === 0 && currentTime < contractStartTime && !allStaked) {
+           setStakingEndTime(contractStartTime);
+         } else {
+           setStakingEndTime(null);
+         }
+
+         // 获取下一轮检查时间信息
+         try {
+           const timeInfo = await contractService.getNextCheckTime(id);
+           setCheckTimeInfo(timeInfo);
+           
+           // 计算下一轮监督者检查窗口结束时间
+           if (timeInfo.isInCheckWindow && timeInfo.timeUntilCheckWindowEnd > 0) {
+             // 如果在检查窗口内，使用当前时间加上剩余窗口时间
+             const checkWindowEndTime = Math.floor(Date.now() / 1000) + timeInfo.timeUntilCheckWindowEnd;
+             setNextCheckEndTime(checkWindowEndTime);
+           } else if (timeInfo.timeUntilNextCheck > 0) {
+              // 如果不在检查窗口内但有下次检查时间，计算下次检查窗口结束时间
+              // 使用固定的检查窗口时长（1小时）
+              const checkWindowDuration = 3600; // 1小时
+              const checkWindowEndTime = timeInfo.nextCheckTime + checkWindowDuration;
+              setNextCheckEndTime(checkWindowEndTime);
+           } else {
+             setNextCheckEndTime(null);
+           }
+         } catch (err) {
+           console.error('获取检查时间信息失败:', err);
+           setNextCheckEndTime(null);
+         }
+
+         // 如果当前用户是监督者，获取监督者状态
          if (oathData.supervisors && oathData.supervisors.includes(currentUser.toLowerCase())) {
            try {
              const status = await contractService.getSupervisorStatus(id, currentUser);
@@ -311,9 +352,6 @@ const OathDetail: React.FC = () => {
                ...status,
                expectedReward: reward
              });
-
-             const timeInfo = await contractService.getNextCheckTime(id);
-             setCheckTimeInfo(timeInfo);
            } catch (err) {
              console.error('获取监督者状态失败:', err);
            }
@@ -633,6 +671,44 @@ const OathDetail: React.FC = () => {
                   </Box>
                 </Grid>
               </Grid>
+              
+              {/* 倒计时区域 */}
+              {(stakingEndTime || nextCheckEndTime) && (
+                <Box sx={{ 
+                  p: 2, 
+                  bgcolor: 'background.paper', 
+                  borderRadius: 2, 
+                  border: '1px solid', 
+                  borderColor: 'divider',
+                  mb: 2
+                }}>
+                  <Typography variant="h6" sx={{ mb: 2, fontWeight: 'bold' }}>
+                    重要时间提醒
+                  </Typography>
+                  <Grid container spacing={2}>
+                    {stakingEndTime && (
+                      <Grid size={{xs:12, md:6}}>
+                        <CountdownTimer
+                          targetTime={stakingEndTime}
+                          title="质押截止倒计时"
+                          color="warning"
+                          size="medium"
+                        />
+                      </Grid>
+                    )}
+                    {nextCheckEndTime && (
+                      <Grid size={{xs:12, md:6}}>
+                        <CountdownTimer
+                          targetTime={nextCheckEndTime}
+                          title="监督检查窗口结束倒计时"
+                          color="error"
+                          size="medium"
+                        />
+                      </Grid>
+                    )}
+                  </Grid>
+                </Box>
+              )}
               
               {/* 角色相关操作按钮 */}
               <Box sx={{ display: 'flex', gap: 2, mt: 3, flexWrap: 'wrap' }}>
