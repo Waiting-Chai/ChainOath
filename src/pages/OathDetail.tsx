@@ -65,7 +65,7 @@ interface OathDetailData {
     name: string;
     status: 'staked' | 'not_staked';
     address: string;
-    role: 'creator' | 'supervisor';
+    role: 'creator' | 'supervisor' | 'committer';
   }>;
   committers: string[];
   supervisors: string[];
@@ -237,6 +237,27 @@ const OathDetail: React.FC = () => {
                 address: supervisor,
                 role: 'supervisor' as const,
                 name: supervisor.slice(0, 6) + '...' + supervisor.slice(-4),
+                status: 'not_staked' as 'staked' | 'not_staked'
+              });
+            }
+          }
+
+          // 添加所有监督者（包括创建者如果他也是监督者）
+          for (const committer of (oathData.committers || [])) {
+            try {
+              const committerStaked = await contractService.hasCommitterStaked(id, committer);
+              witnessesData.push({
+                address: committer,
+                role: 'committer' as const,
+                name: committer.slice(0, 6) + '...' + committer.slice(-4),
+                status: committerStaked ? 'staked' : 'not_staked' as 'staked' | 'not_staked'
+              });
+            } catch (err) {
+              console.error('检查守约人质押状态失败:', err);
+              witnessesData.push({
+                address: committer,
+                role: 'committer' as const,
+                name: committer.slice(0, 6) + '...' + committer.slice(-4),
                 status: 'not_staked' as 'staked' | 'not_staked'
               });
             }
@@ -923,7 +944,7 @@ const OathDetail: React.FC = () => {
               boxShadow: '0 4px 12px rgba(0,0,0,0.05)'
             }}>
               <Typography variant="h6" component="h2" sx={{ fontWeight: 'bold', mb: 3 }}>
-                见证人
+                相关人员
               </Typography>
               
               <List sx={{ p: 0 }}>
@@ -933,6 +954,15 @@ const OathDetail: React.FC = () => {
                       primary={
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                           <Typography variant="body1">{witness.name}</Typography>
+                          {witness.role === 'committer' && (
+                            <Chip 
+                              icon={<GavelIcon />} 
+                              label="守约人" 
+                              size="small" 
+                              color="secondary" 
+                              variant="outlined"
+                            />
+                          )}
                           {witness.role === 'creator' && (
                             <Chip 
                               icon={<StarIcon />} 

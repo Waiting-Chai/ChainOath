@@ -715,7 +715,7 @@ export class ContractService {
       console.log(`开始查找用户 ${userAddress} 作为监督者的誓约，总誓约数: ${nextOathId}`);
       
       // 遍历所有誓约ID，查找用户作为监督者的誓约
-      for (let i = 0; i < nextOathId; i++) {
+      for (let i = 0; i < nextOathId; i ++) {
         try {
           const oathInfo = await this.getOath(i.toString());
           if (oathInfo.supervisors.some(supervisor => supervisor.toLowerCase() === userAddress.toLowerCase())) {
