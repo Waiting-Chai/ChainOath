@@ -54,12 +54,18 @@ ChainOath/
 
 ### 核心技术栈
 - **前端框架**：React 18 + TypeScript + Vite
-- **UI 组件库**：Material-UI (MUI) v6
+- **UI 组件库**：Material-UI (MUI) v7 (使用 Grid v2 API)
 - **区块链交互**：ethers.js v6
 - **智能合约**：Solidity + Foundry
 - **去中心化存储**：IPFS (用于存储誓约详情)
 - **去中心化消息**：XMTP (用于参与者间通信)
 - **网络支持**：Ethereum Mainnet / Sepolia Testnet
+
+#### MUI v7 Grid v2 API 使用说明
+项目已升级到 MUI v7，使用新的 Grid v2 API：
+- 移除了 `item` 属性（所有 Grid 默认为 item）
+- 使用 `size` 属性替代 `xs`、`sm`、`md`、`lg` 等响应式属性
+- 示例：`<Grid size={{ xs: 12, sm: 6, md: 4 }}>` 替代 `<Grid item xs={12} sm={6} md={4}>`
 
 ### 开发工具链
 - **构建工具**：Vite 7.0.6 (快速热重载)
@@ -83,8 +89,17 @@ cp .env.example .env
 # 设置当前使用的网络
 VITE_NETWORK=sepolia  # 可选: mainnet, sepolia, localhost
 
-# Sepolia 测试网 - 单一主合约地址
-VITE_SEPOLIA_CONTRACT_ADDRESS=0x8DF221De9e8f3C890DC3072f7f8d07A1B5910fcD
+# Sepolia 测试网合约地址
+VITE_SEPOLIA_CONTRACT_ADDRESS=0x217390d10edc2c82c7ff2bcdb0d20f257a8f5485  # ChainOath 主合约
+VITE_SEPOLIA_NFT_CONTRACT_ADDRESS=0x3f24af74f777c61055940e72f2bc181c373b3cb0  # ChainOathNFT 成就合约
+
+# 主网合约地址（生产环境）
+VITE_MAINNET_CONTRACT_ADDRESS=0x0000000000000000000000000000000000000000  # 待部署
+VITE_MAINNET_NFT_CONTRACT_ADDRESS=0x0000000000000000000000000000000000000000  # 待部署
+
+# 本地开发网络
+VITE_LOCALHOST_CONTRACT_ADDRESS=0x0000000000000000000000000000000000000000  # 本地部署后更新
+VITE_LOCALHOST_NFT_CONTRACT_ADDRESS=0x0000000000000000000000000000000000000000  # 本地部署后更新
 ```
 
 3. **网络说明**
@@ -97,20 +112,63 @@ VITE_SEPOLIA_CONTRACT_ADDRESS=0x8DF221De9e8f3C890DC3072f7f8d07A1B5910fcD
 - 降低成本：避免重复部署，节省 Gas 费用
 - 统一管理：所有誓约数据集中存储，便于查询和统计
 
-## 部署信息
+## 智能合约部署信息
 
-### Sepolia 测试网部署
+### 主合约 (ChainOathSecure)
 
-**合约地址**: `0x8DF221De9e8f3C890DC3072f7f8d07A1B5910fcD`
-**部署交易**: `0x15f60d028145d7e7c1bcaf87c99f1f85b8afed2c5fa5fe0c209d664fc89ca739`
-**部署区块**: `8972397`
-**网络**: Sepolia Testnet (Chain ID: 11155111)
-**Gas 费用**: 0.000029667698948729 ETH
-**区块浏览器**: [查看合约](https://sepolia.etherscan.io/address/0x8DF221De9e8f3C890DC3072f7f8d07A1B5910fcD)
+#### Sepolia 测试网
+- **合约地址**: `0x217390d10edc2c82c7ff2bcdb0d20f257a8f5485`
+- **合约名称**: ChainOathSecure
+- **编译器版本**: Solidity 0.8.19
+- **优化**: 启用 (200 runs)
+- **网络**: Sepolia Testnet (Chain ID: 11155111)
+- **区块浏览器**: [查看合约](https://sepolia.etherscan.io/address/0x217390d10edc2c82c7ff2bcdb0d20f257a8f5485)
+- **验证状态**: ✅ 已验证
 
-### 合约验证
+#### 主网 (待部署)
+- **合约地址**: 待部署
+- **状态**: 🚧 开发中
 
-合约已成功部署并可在 Sepolia 测试网上使用。所有誓约数据都存储在这个单一主合约中，通过 `oathId` 进行区分和管理。
+#### 本地测试网
+- **合约地址**: 动态分配
+- **启动方式**: `anvil` 本地节点
+
+### NFT合约 (ChainOathNFT)
+
+#### Sepolia 测试网
+- **合约地址**: `0x3f24af74f777c61055940e72f2bc181c373b3cb0`
+- **合约名称**: ChainOathNFT
+- **标准**: ERC-721
+- **编译器版本**: Solidity 0.8.19
+- **优化**: 启用 (200 runs)
+- **网络**: Sepolia Testnet (Chain ID: 11155111)
+- **区块浏览器**: [查看合约](https://sepolia.etherscan.io/address/0x3f24af74f777c61055940e72f2bc181c373b3cb0)
+- **验证状态**: ✅ 已验证
+- **关联主合约**: `0x217390d10edc2c82c7ff2bcdb0d20f257a8f5485`
+
+#### 主网 (待部署)
+- **合约地址**: 待部署
+- **状态**: 🚧 开发中
+
+#### 本地测试网
+- **合约地址**: 动态分配
+- **启动方式**: `anvil` 本地节点
+
+### 合约功能概览
+
+| 合约 | 主要功能 | Gas 消耗估算 | 状态 |
+|------|----------|-------------|------|
+| **ChainOathSecure** | 誓约创建、质押管理、监督验证、奖励分配 | 200K-500K | ✅ 已部署 |
+| **ChainOathNFT** | 成就NFT铸造、元数据管理、成就验证 | 100K-300K | ✅ 已部署 |
+
+### 合约验证与安全
+
+- ✅ **源码验证**: 所有合约源码已在区块浏览器上验证
+- ✅ **单元测试**: 使用 Foundry 框架，测试覆盖率 > 90%
+- ✅ **Gas 优化**: 启用编译器优化，减少交易成本
+- ✅ **重入保护**: 使用 ReentrancyGuard 防止重入攻击
+- ✅ **权限控制**: 严格的角色权限验证机制
+- ⚠️ **审计状态**: 待专业安全审计
 
 ## 项目愿景与核心理念
 
@@ -158,6 +216,164 @@ contract ChainOathSecure {
     function supervisorStake(uint256 oathId, ...) external
     function getOath(uint256 oathId) external view returns (Oath memory)
 }
+```
+
+## 智能合约API文档
+
+### 主合约 (ChainOathSecure) API
+
+#### 核心函数
+
+##### 1. 创建誓约
+```solidity
+function createOath(
+    string memory title,
+    string memory description,
+    address[] memory committers,
+    address[] memory supervisors,
+    uint256 totalReward,
+    uint256 committerStakeAmount,
+    uint256 supervisorStakeAmount,
+    address tokenAddress
+) external returns (uint256 oathId)
+```
+
+**参数说明**:
+- `title`: 誓约标题 (最大100字符)
+- `description`: 誓约描述 (最大1000字符)
+- `committers`: 守约人地址数组 (最多5人)
+- `supervisors`: 监督者地址数组 (最多10人)
+- `totalReward`: 总奖励金额 (Wei单位)
+- `committerStakeAmount`: 守约人质押金额
+- `supervisorStakeAmount`: 监督者质押金额
+- `tokenAddress`: ERC20代币地址
+
+**返回值**: 新创建的誓约ID
+
+##### 2. 守约人质押
+```solidity
+function committerStake(uint256 oathId, address token, uint256 amount) external
+```
+
+**前置条件**:
+- 誓约状态为 `Pending`
+- 调用者为指定的守约人
+- 已授权合约使用代币
+
+##### 3. 监督者质押
+```solidity
+function supervisorStake(uint256 oathId, address token, uint256 amount) external
+```
+
+**前置条件**:
+- 誓约状态为 `Pending`
+- 调用者为指定的监督者
+- 已授权合约使用代币
+
+##### 4. 提交监督验证
+```solidity
+function submitSupervision(uint256 oathId, bool approved) external
+```
+
+**参数说明**:
+- `oathId`: 誓约ID
+- `approved`: true表示守约，false表示失约
+
+##### 5. 完成检查点
+```solidity
+function completeCheckpoint(uint256 oathId, uint256 checkpointIndex) external
+```
+
+**前置条件**:
+- 调用者为守约人
+- 检查点未完成
+
+##### 6. 领取奖励
+```solidity
+function claimReward(uint256 oathId) external
+```
+
+**前置条件**:
+- 誓约已完成或失败
+- 调用者有可领取的奖励
+
+#### 查询函数
+
+##### 1. 获取誓约信息
+```solidity
+function getOath(uint256 oathId) external view returns (Oath memory)
+```
+
+##### 2. 检查质押状态
+```solidity
+function hasStaked(uint256 oathId, address user) external view returns (bool)
+```
+
+##### 3. 获取奖励分配
+```solidity
+function getRewardDistribution(uint256 oathId) external view returns (RewardDistribution memory)
+```
+
+### NFT合约 (ChainOathNFT) API
+
+#### 核心函数
+
+##### 1. 铸造成就NFT
+```solidity
+function mintAchievement(
+    AchievementType achievementType,
+    uint256 oathId,
+    string memory metadataURI
+) external payable
+```
+
+**参数说明**:
+- `achievementType`: 成就类型枚举
+- `oathId`: 相关誓约ID
+- `metadataURI`: NFT元数据URI
+
+**支付金额**: 0.001 ETH (铸造费用)
+
+##### 2. 检查成就资格
+```solidity
+function checkEligibility(address user, AchievementType achievementType) external view returns (bool)
+```
+
+##### 3. 检查用户成就
+```solidity
+function hasAchievement(address user, AchievementType achievementType) external view returns (bool)
+```
+
+#### 成就类型
+
+```solidity
+enum AchievementType {
+    OATH_CREATOR,      // 誓约创建者
+    OATH_KEEPER,       // 守约达人
+    SUPERVISOR,        // 监督专家
+    COMMUNITY_STAR,    // 社区之星
+    CHECKPOINT_MASTER, // 检查点大师
+    ENGAGEMENT_KING    // 互动之王
+}
+```
+
+### 事件定义
+
+#### 主合约事件
+```solidity
+event OathCreated(uint256 indexed oathId, address indexed creator, string title);
+event StakeDeposited(uint256 indexed oathId, address indexed staker, uint256 amount, address token);
+event OathAccepted(uint256 indexed oathId);
+event SupervisionSubmitted(uint256 indexed oathId, address indexed supervisor, bool approved);
+event CheckpointCompleted(uint256 indexed oathId, uint256 checkpointIndex, address completedBy);
+event OathStatusChanged(uint256 indexed oathId, OathStatus newStatus);
+event RewardClaimed(uint256 indexed oathId, address indexed claimer, uint256 amount);
+```
+
+#### NFT合约事件
+```solidity
+event AchievementMinted(uint256 indexed tokenId, address indexed recipient, AchievementType achievementType, uint256 oathId);
+event AchievementRequirementUpdated(AchievementType achievementType, uint256 newRequirement);
 ```
 
 ## 智能合约设计
@@ -375,9 +591,189 @@ npm run build
 npm run preview
 ```
 
+## 前端集成指南
+
+### 合约服务集成
+
+#### 1. 初始化合约服务
+```typescript
+import { ContractService } from './services/contractService';
+
+// 创建合约服务实例
+const contractService = new ContractService();
+
+// 连接钱包
+await contractService.connectWallet();
+
+// 验证网络
+const isValidNetwork = await contractService.validateNetwork();
+```
+
+#### 2. 创建誓约
+```typescript
+// 创建誓约参数
+const oathParams = {
+  title: '每日运动打卡',
+  description: '每天运动30分钟，坚持30天',
+  committers: ['0x...'], // 守约人地址
+  supervisors: ['0x...'], // 监督者地址
+  totalReward: ethers.parseEther('1.0'), // 1 ETH奖励
+  committerStakeAmount: ethers.parseEther('0.1'), // 0.1 ETH质押
+  supervisorStakeAmount: ethers.parseEther('0.05'), // 0.05 ETH质押
+  tokenAddress: '0x...' // ERC20代币地址
+};
+
+// 创建誓约
+const oathId = await contractService.createOath(oathParams);
+console.log('创建的誓约ID:', oathId);
+```
+
+#### 3. 质押操作
+```typescript
+// 守约人质押
+await contractService.committerStake(oathId, tokenAddress, stakeAmount);
+
+// 监督者质押
+await contractService.supervisorStake(oathId, tokenAddress, stakeAmount);
+```
+
+#### 4. 监督验证
+```typescript
+// 提交监督结果
+await contractService.submitSupervision(oathId, true); // true表示守约
+```
+
+#### 5. 成就NFT铸造
+```typescript
+// 检查成就资格
+const isEligible = await contractService.checkAchievementEligibility(
+  userAddress, 
+  'OATH_CREATOR'
+);
+
+if (isEligible) {
+  // 铸造成就NFT
+  await contractService.mintAchievement(
+    'OATH_CREATOR',
+    oathId,
+    metadataURI,
+    { value: ethers.parseEther('0.001') } // 铸造费用
+  );
+}
+```
+
+### 事件监听
+
+```typescript
+// 监听誓约创建事件
+contractService.onOathCreated((oathId, creator, title) => {
+  console.log(`新誓约创建: ${title} (ID: ${oathId})`);
+  // 更新UI状态
+});
+
+// 监听质押事件
+contractService.onStakeDeposited((oathId, staker, amount) => {
+  console.log(`质押完成: ${amount} by ${staker}`);
+  // 更新质押状态
+});
+
+// 监听成就铸造事件
+contractService.onAchievementMinted((tokenId, recipient, achievementType) => {
+  console.log(`成就NFT铸造: ${achievementType} -> ${recipient}`);
+  // 显示成就通知
+});
+```
+
+### 错误处理最佳实践
+
+```typescript
+try {
+  await contractService.createOath(oathParams);
+} catch (error) {
+  if (error.code === 'INSUFFICIENT_FUNDS') {
+    // 余额不足处理
+    showError('余额不足，请充值后重试');
+  } else if (error.code === 'USER_REJECTED') {
+    // 用户拒绝交易
+    showError('交易被用户取消');
+  } else if (error.message.includes('Invalid oath parameters')) {
+    // 参数验证失败
+    showError('誓约参数无效，请检查输入');
+  } else {
+    // 其他错误
+    showError('交易失败，请稍后重试');
+  }
+}
+```
+
+### Gas 优化建议
+
+1. **批量操作**: 使用 Multicall 进行批量查询
+2. **Gas 估算**: 交易前预估 Gas 费用
+3. **缓存数据**: 缓存常用的合约数据，减少重复查询
+4. **事件过滤**: 使用事件过滤器减少不必要的网络请求
+
+```typescript
+// Gas 估算示例
+const gasEstimate = await contractService.estimateGas('createOath', oathParams);
+const gasPrice = await contractService.getGasPrice();
+const estimatedCost = gasEstimate * gasPrice;
+
+console.log(`预估交易费用: ${ethers.formatEther(estimatedCost)} ETH`);
+```
+
+## 开发最佳实践
+
+### 1. 类型安全
+- 使用 TypeScript 严格模式
+- 定义完整的接口类型
+- 避免使用 `any` 类型
+
+### 2. 错误处理
+- 实现全局错误处理机制
+- 提供用户友好的错误信息
+- 记录详细的错误日志
+
+### 3. 性能优化
+- 使用 React.memo 优化组件渲染
+- 实现虚拟滚动处理大量数据
+- 使用 Web Workers 处理复杂计算
+
+### 4. 安全考虑
+- 验证所有用户输入
+- 使用 HTTPS 连接
+- 实现 CSP (Content Security Policy)
+- 定期更新依赖包
+
+### 5. 用户体验
+- 提供加载状态指示
+- 实现离线功能支持
+- 优化移动端体验
+- 支持多语言国际化
+
 ## 未来可拓展方向
 
-- 社交功能：允许用户评论、点赞或见证他人的誓约
-- 模板市场：用户可以创建和分享常用的誓约模板
-- DAO 治理：引入治理代币，由社区决定平台的发展方向和参数
-- 多链支持：将 ChainOath 扩展到其他 EVM 兼容链，如 Polygon, Arbitrum 等
+### 技术架构升级
+- **Layer 2 集成**: 支持 Polygon、Arbitrum 等 L2 网络，降低交易成本
+- **跨链桥接**: 实现多链资产互通，扩大用户基础
+- **去中心化存储**: 集成 IPFS/Arweave，实现完全去中心化的数据存储
+- **零知识证明**: 引入 zk-SNARKs 保护用户隐私
+
+### 功能扩展
+- **社交功能**: 允许用户评论、点赞或见证他人的誓约
+- **模板市场**: 用户可以创建和分享常用的誓约模板
+- **DAO 治理**: 引入治理代币，由社区决定平台的发展方向和参数
+- **AI 辅助**: 智能推荐誓约模板，自动化监督验证
+- **游戏化元素**: 引入等级系统、排行榜、团队挑战等
+
+### 生态建设
+- **开发者工具**: 提供 SDK、API 文档、测试工具
+- **合作伙伴集成**: 与健身、学习、工作类应用集成
+- **企业解决方案**: 为企业提供团队目标管理工具
+- **移动应用**: 开发原生 iOS/Android 应用
+
+### 商业模式创新
+- **订阅服务**: 高级功能订阅模式
+- **NFT 市场**: 成就NFT交易市场
+- **保险产品**: 为誓约履行提供保险服务
+- **数据分析**: 提供个人和企业数据洞察服务

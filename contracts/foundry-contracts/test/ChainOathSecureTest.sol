@@ -70,24 +70,27 @@ contract ChainOathSecureTest is Test {
             committerStake: COMMITTER_STAKE,
             supervisorStake: SUPERVISOR_STAKE,
             supervisorRewardRatio: 20, // 20%
-            checkInterval: 86400, // 1 day
-            checkWindow: 3600, // 1 hour
             checkThresholdPercent: 60, // 60%
             maxSupervisorMisses: 2,
             maxCommitterFailures: 1,
-            checkRoundsCount: 0, // 将被自动计算
-            startTime: uint32(block.timestamp + 3600), // 1小时后开始
-            endTime: uint32(block.timestamp + 3600 + 7 * 86400), // 7天后结束
             createTime: 0, // 将被自动设置
             creator: address(0), // 将被自动设置
             token: IERC20(address(0)), // 将被自动设置
-            status: ChainOathSecure.OathStatus.Pending
+            status: ChainOathSecure.OathStatus.Pending,
+            checkpoints: new ChainOathSecure.Checkpoint[](0),
+            likesCount: 0,
+            comments: new ChainOathSecure.Comment[](0)
         });
         
         // 创建者授权并创建誓约
+        string[] memory checkpointDescriptions = new string[](3);
+        checkpointDescriptions[0] = "Checkpoint 1";
+        checkpointDescriptions[1] = "Checkpoint 2";
+        checkpointDescriptions[2] = "Checkpoint 3";
+        
         vm.startPrank(creator);
         token.approve(address(chainOath), TOTAL_REWARD);
-        chainOath.createOath(oath, address(token));
+        chainOath.createOath(oath, address(token), checkpointDescriptions);
         vm.stopPrank();
         
         return 0; // 第一个誓约ID
@@ -135,27 +138,28 @@ contract ChainOathSecureTest is Test {
             committerStake: COMMITTER_STAKE,
             supervisorStake: SUPERVISOR_STAKE,
             supervisorRewardRatio: 20,
-            checkInterval: 86400,
-            checkWindow: 3600,
             checkThresholdPercent: 60,
             maxSupervisorMisses: 2,
             maxCommitterFailures: 1,
-            checkRoundsCount: 0,
-            startTime: uint32(block.timestamp + 3600),
-            endTime: uint32(block.timestamp + 3600 + 7 * 86400),
             createTime: 0,
             creator: address(0),
             token: IERC20(address(0)),
-            status: ChainOathSecure.OathStatus.Pending
+            status: ChainOathSecure.OathStatus.Pending,
+            checkpoints: new ChainOathSecure.Checkpoint[](0),
+            likesCount: 0,
+            comments: new ChainOathSecure.Comment[](0)
         });
         
         // 尝试使用未授权代币创建誓约应该失败
+        string[] memory checkpointDescriptions = new string[](1);
+        checkpointDescriptions[0] = "Test Checkpoint";
+        
         vm.startPrank(creator);
         unauthorizedToken.mint(creator, TOTAL_REWARD);
         unauthorizedToken.approve(address(chainOath), TOTAL_REWARD);
         
         vm.expectRevert("Token not whitelisted");
-        chainOath.createOath(oath, address(unauthorizedToken));
+        chainOath.createOath(oath, address(unauthorizedToken), checkpointDescriptions);
         vm.stopPrank();
     }
     
@@ -193,10 +197,10 @@ contract ChainOathSecureTest is Test {
         // 跳转到誓约开始时间
         vm.warp(block.timestamp + 3600);
         
-        // 模拟誓约完成（所有轮次都成功）
-        uint16 totalRounds = chainOath.getOath(oathId).checkRoundsCount;
+        // 模拟誓约完成（所有检查点都成功）
+        uint16 totalCheckpoints = uint16(chainOath.getOath(oathId).checkpoints.length);
         
-        for (uint16 round = 1; round <= totalRounds; round++) {
+        for (uint16 checkpointIndex = 0; checkpointIndex < totalCheckpoints; checkpointIndex++) {
             // 跳转到当前轮次
             vm.warp(block.timestamp + 86400);
             
@@ -207,17 +211,8 @@ contract ChainOathSecureTest is Test {
              }
             
             // 监督者提交批准
-            vm.prank(supervisor1);
-            chainOath.submitSupervision(oathId, true);
-            
-            // 再次检查状态
-             status = chainOath.getOath(oathId).status;
-             if (status == ChainOathSecure.OathStatus.Fulfilled || status == ChainOathSecure.OathStatus.Broken) {
-                 break;
-             }
-            
-            vm.prank(supervisor2);
-            chainOath.submitSupervision(oathId, true);
+            vm.prank(committer);
+            chainOath.completeCheckpoint(oathId);
         }
         
         // 记录合约初始余额（移除未使用的变量）
@@ -260,8 +255,8 @@ contract ChainOathSecureTest is Test {
         vm.warp(block.timestamp + 3600);
         
         // 模拟誓约完成
-        uint16 totalRounds = chainOath.getOath(oathId).checkRoundsCount;
-        for (uint16 round = 1; round <= totalRounds; round++) {
+        uint16 totalCheckpoints = uint16(chainOath.getOath(oathId).checkpoints.length);
+        for (uint16 checkpointIndex = 0; checkpointIndex < totalCheckpoints; checkpointIndex++) {
             vm.warp(block.timestamp + 86400);
             
             // 检查誓约状态
@@ -270,17 +265,8 @@ contract ChainOathSecureTest is Test {
                  break;
              }
             
-            vm.prank(supervisor1);
-            chainOath.submitSupervision(oathId, true);
-            
-            // 再次检查状态
-             status = chainOath.getOath(oathId).status;
-             if (status == ChainOathSecure.OathStatus.Fulfilled || status == ChainOathSecure.OathStatus.Broken) {
-                 break;
-             }
-            
-            vm.prank(supervisor2);
-            chainOath.submitSupervision(oathId, true);
+            vm.prank(committer);
+            chainOath.completeCheckpoint(oathId);
         }
         
         // 守约人第一次领取奖励
@@ -336,25 +322,26 @@ contract ChainOathSecureTest is Test {
             committerStake: 500,
             supervisorStake: 200,
             supervisorRewardRatio: 20,
-            checkInterval: 86400,
-            checkWindow: 3600,
             checkThresholdPercent: 60,
             maxSupervisorMisses: 2,
             maxCommitterFailures: 1,
-            checkRoundsCount: 0,
-            startTime: uint32(block.timestamp + 3600),
-            endTime: uint32(block.timestamp + 3600 + 7 * 86400),
             createTime: 0,
             creator: address(0),
             token: IERC20(address(0)),
-            status: ChainOathSecure.OathStatus.Pending
+            status: ChainOathSecure.OathStatus.Pending,
+            checkpoints: new ChainOathSecure.Checkpoint[](0),
+            likesCount: 0,
+            comments: new ChainOathSecure.Comment[](0)
         });
         
         // 尝试创建金额过小的誓约应该失败
+        string[] memory checkpointDescriptions = new string[](1);
+        checkpointDescriptions[0] = "Test Checkpoint";
+        
         vm.startPrank(creator);
         token.approve(address(chainOath), 1000);
         vm.expectRevert("Total reward too small");
-        chainOath.createOath(oath, address(token));
+        chainOath.createOath(oath, address(token), checkpointDescriptions);
         vm.stopPrank();
     }
     
@@ -374,24 +361,25 @@ contract ChainOathSecureTest is Test {
             committerStake: COMMITTER_STAKE,
             supervisorStake: SUPERVISOR_STAKE,
             supervisorRewardRatio: 20,
-            checkInterval: 86400,
-            checkWindow: 3600,
             checkThresholdPercent: 60,
             maxSupervisorMisses: 2,
             maxCommitterFailures: 1,
-            checkRoundsCount: 0,
-            startTime: uint32(block.timestamp + 3600),
-            endTime: uint32(block.timestamp + 3600 + 7 * 86400),
             createTime: 0,
             creator: address(0),
             token: IERC20(address(0)),
-            status: ChainOathSecure.OathStatus.Pending
+            status: ChainOathSecure.OathStatus.Pending,
+            checkpoints: new ChainOathSecure.Checkpoint[](0),
+            likesCount: 0,
+            comments: new ChainOathSecure.Comment[](0)
         });
+        
+        string[] memory checkpointDescriptions = new string[](1);
+        checkpointDescriptions[0] = "Test Checkpoint";
         
         vm.startPrank(creator);
         token.approve(address(chainOath), TOTAL_REWARD);
         vm.expectRevert("Creator cannot be supervisor");
-        chainOath.createOath(oath, address(token));
+        chainOath.createOath(oath, address(token), checkpointDescriptions);
         vm.stopPrank();
     }
     
@@ -413,8 +401,8 @@ contract ChainOathSecureTest is Test {
         
         // 完成誓约并领取奖励后检查记录
         vm.warp(block.timestamp + 3600);
-        uint16 totalRounds = chainOath.getOath(oathId).checkRoundsCount;
-        for (uint16 round = 1; round <= totalRounds; round++) {
+        uint16 totalCheckpoints = uint16(chainOath.getOath(oathId).checkpoints.length);
+        for (uint16 checkpointIndex = 0; checkpointIndex < totalCheckpoints; checkpointIndex++) {
             vm.warp(block.timestamp + 86400);
             
             // 检查誓约状态
@@ -423,17 +411,8 @@ contract ChainOathSecureTest is Test {
                  break;
              }
              
-             vm.prank(supervisor1);
-             chainOath.submitSupervision(oathId, true);
-             
-             // 再次检查状态
-             status = chainOath.getOath(oathId).status;
-             if (status == ChainOathSecure.OathStatus.Fulfilled || status == ChainOathSecure.OathStatus.Broken) {
-                 break;
-             }
-            
-            vm.prank(supervisor2);
-            chainOath.submitSupervision(oathId, true);
+             vm.prank(committer);
+             chainOath.completeCheckpoint(oathId);
         }
         
         vm.prank(committer);

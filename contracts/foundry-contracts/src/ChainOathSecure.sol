@@ -20,6 +20,21 @@ contract ChainOathSecure is ReentrancyGuard, Ownable, Pausable {
         Aborted     // 因为种种原因被废止了
     }
     
+    /// 检查点结构
+    struct Checkpoint {
+        string description;              // 检查点描述
+        bool isCompleted;               // 是否已完成
+        uint32 completedTime;           // 完成时间
+        address completedBy;            // 完成者地址
+    }
+    
+    /// 评论结构
+    struct Comment {
+        address author;                 // 评论作者
+        string content;                 // 评论内容
+        uint32 timestamp;              // 评论时间
+    }
+    
     /// 誓约主体结构
     struct Oath {
         string title;                    // 誓约标题
@@ -30,18 +45,16 @@ contract ChainOathSecure is ReentrancyGuard, Ownable, Pausable {
         uint256 committerStake;          // 守约人需质押金额
         uint256 supervisorStake;         // 每位监督者需质押金额
         uint16 supervisorRewardRatio;    // 监督者奖励比例（如 10 表示 10%）
-        uint32 checkInterval;            // check 间隔（单位：秒）
-        uint32 checkWindow;              // check 后签名时间窗口（单位：秒）
         uint16 checkThresholdPercent;    // 判定守约成功的监督者签名比例
         uint16 maxSupervisorMisses;      // 监督者最大允许失职次数
         uint16 maxCommitterFailures;     // 守约人最大允许失约次数
-        uint16 checkRoundsCount;         // 总检查轮次
-        uint32 startTime;                // 誓约开始时间（时间戳，单位为s）
-        uint32 endTime;                  // 誓约结束时间（时间戳，单位为s）
         uint32 createTime;               // 创建时间（时间戳，单位为s）
         address creator;                 // 创建者地址
         IERC20 token;                    // 使用的ERC20代币（统一代币类型）
         OathStatus status;               // 当前状态
+        Checkpoint[] checkpoints;        // 检查点数组
+        uint32 likesCount;               // 点赞数量
+        Comment[] comments;              // 评论数组
     }
     
     /// 监督记录结构
@@ -86,6 +99,10 @@ contract ChainOathSecure is ReentrancyGuard, Ownable, Pausable {
     mapping(uint256 => uint16) public committerFailures;
     mapping(uint256 => RewardDistribution) public rewardDistributions;
     
+    // 点赞相关映射
+    mapping(uint256 => mapping(address => bool)) public hasLiked; // 用户是否已点赞某个誓约
+    mapping(uint256 => uint16) public currentCheckpointIndex; // 当前检查点索引
+    
     // 安全机制
     mapping(address => bool) public tokenWhitelist;     // 代币白名单
     uint256 public constant MAX_SUPERVISORS = 20;       // 最大监督者数量
@@ -98,11 +115,18 @@ contract ChainOathSecure is ReentrancyGuard, Ownable, Pausable {
     event OathFulfilled(uint256 indexed oathId);
     event OathBroken(uint256 indexed oathId);
     event StakeDeposited(uint256 indexed oathId, address indexed staker, uint256 amount, address token);
-    event SupervisionSubmitted(uint256 indexed oathId, uint16 round, address indexed supervisor, bool approval);
+    event SupervisionSubmitted(uint256 indexed oathId, uint16 checkpointIndex, address indexed supervisor, bool approval);
     event RewardClaimed(uint256 indexed oathId, address indexed claimer, uint256 amount, address token);
     event TokenWhitelistUpdated(address indexed token, bool isWhitelisted);
     event EmergencyWithdraw(uint256 indexed oathId, address indexed token, uint256 amount);
     event DebugLog(string message, uint256 step);  // 调试日志事件
+    
+    // 新增事件
+    event CheckpointCompleted(uint256 indexed oathId, uint16 checkpointIndex, address indexed completedBy);
+    event OathLiked(uint256 indexed oathId, address indexed liker);
+    event OathUnliked(uint256 indexed oathId, address indexed unliker);
+    event CommentAdded(uint256 indexed oathId, address indexed author, string content);
+    event CheckpointAdded(uint256 indexed oathId, string description);
     
     constructor() Ownable(msg.sender) {}
     
@@ -130,53 +154,23 @@ contract ChainOathSecure is ReentrancyGuard, Ownable, Pausable {
      * 创建新的誓约
      * _oath 誓约结构体数据
      * _token 使用的ERC20代币地址（必须在白名单中）
+     * _checkpointDescriptions 检查点描述数组
      */
     function createOath(
         Oath memory _oath,
-        address _token
+        address _token,
+        string[] memory _checkpointDescriptions
     ) external nonReentrant whenNotPaused {
-        // 添加详细的验证日志事件
-        emit DebugLog("Starting createOath validation", 0);
-        
+        // 基本验证
         require(tokenWhitelist[_token], "Token not whitelisted");
-        emit DebugLog("Token whitelist check passed", 1);
-        
-        require(block.timestamp < _oath.startTime, "Start time must be in the future");
-        emit DebugLog("Start time check passed", 2);
-        
-        require(_oath.startTime < _oath.endTime, "End time must be after start time");
-        emit DebugLog("End time check passed", 3);
-        
         require(_oath.committer != address(0), "Invalid committer address");
-        emit DebugLog("Committer address check passed", 4);
-        
-        // require(_oath.committer != msg.sender, "Creator cannot be committer"); // 允许创建者是守约人
-        
         require(_oath.totalReward >= MIN_STAKE_AMOUNT, "Total reward too small");
-        emit DebugLog("Total reward amount check passed", 6);
-        
         require(_oath.committerStake >= MIN_STAKE_AMOUNT, "Committer stake too small");
-        emit DebugLog("Committer stake amount check passed", 7);
-        
         require(_oath.supervisorStake >= MIN_STAKE_AMOUNT, "Supervisor stake too small");
-        emit DebugLog("Supervisor stake amount check passed", 8);
-        
         require(_oath.supervisorRewardRatio <= 100, "Supervisor reward ratio cannot exceed 100%");
-        emit DebugLog("Supervisor reward ratio check passed", 9);
-        
         require(_oath.checkThresholdPercent <= 100 && _oath.checkThresholdPercent > 0, "Invalid check threshold");
-        emit DebugLog("Check threshold check passed", 10);
-        
-        require(_oath.checkInterval > 0, "Check interval must be greater than 0");
-        emit DebugLog("Check interval check passed", 11);
-        
-        require(_oath.checkWindow > 0 && _oath.checkWindow <= _oath.checkInterval, "Invalid check window");
-        emit DebugLog("Check window check passed", 12);
-        
-        // 计算检查轮次
-        uint32 duration = _oath.endTime - _oath.startTime;
-        uint16 rounds = uint16((duration + _oath.checkInterval - 1) / _oath.checkInterval);
-        require(rounds > 0, "Invalid duration");
+        require(_checkpointDescriptions.length > 0, "At least one checkpoint required");
+        require(_checkpointDescriptions.length <= 50, "Too many checkpoints");
         
         uint256 oathId = nextOathId++;
         
@@ -189,47 +183,44 @@ contract ChainOathSecure is ReentrancyGuard, Ownable, Pausable {
         oath.committerStake = _oath.committerStake;
         oath.supervisorStake = _oath.supervisorStake;
         oath.supervisorRewardRatio = _oath.supervisorRewardRatio;
-        oath.checkInterval = _oath.checkInterval;
-        oath.checkWindow = _oath.checkWindow;
         oath.checkThresholdPercent = _oath.checkThresholdPercent;
         oath.maxSupervisorMisses = _oath.maxSupervisorMisses;
         oath.maxCommitterFailures = _oath.maxCommitterFailures;
-        oath.checkRoundsCount = rounds;
-        oath.startTime = _oath.startTime;
-        oath.endTime = _oath.endTime;
-        oath.createTime = uint32(block.timestamp);
         oath.creator = msg.sender;
         oath.token = IERC20(_token);
         oath.status = OathStatus.Pending;
+        oath.likesCount = 0;
+        
+        // 初始化检查点
+        for (uint i = 0; i < _checkpointDescriptions.length; i++) {
+            oath.checkpoints.push(Checkpoint({
+                description: _checkpointDescriptions[i],
+                isCompleted: false,
+                completedTime: 0,
+                completedBy: address(0)
+            }));
+            emit CheckpointAdded(oathId, _checkpointDescriptions[i]);
+        }
+        
+        // 初始化当前检查点索引
+        currentCheckpointIndex[oathId] = 0;
         
         // 复制并检查监督者数组
-        emit DebugLog("Starting supervisor validation", 13);
         for (uint i = 0; i < _oath.supervisors.length; i++) {
             address supervisor = _oath.supervisors[i];
             require(supervisor != address(0), "Invalid supervisor address");
-            emit DebugLog("Supervisor address check passed", 14 + i * 4);
-            
-            // 已移除创建者和守约人不能是监督者的限制
-            // require(supervisor != msg.sender, "Creator cannot be supervisor"); // 允许创建者是监督者
-            // emit DebugLog("Creator-supervisor check passed", 15 + i * 4);
-            
-            // require(supervisor != _oath.committer, "Committer cannot be supervisor"); // 允许守约人是监督者
-            // emit DebugLog("Committer-supervisor check passed", 16 + i * 4);
+            require(supervisor != msg.sender, "Creator cannot be supervisor");
+            require(supervisor != _oath.committer, "Committer cannot be supervisor");
             
             // 检查重复地址
             for (uint j = i + 1; j < _oath.supervisors.length; j++) {
                 require(_oath.supervisors[j] != supervisor, "Duplicate supervisor address");
             }
-            emit DebugLog("Duplicate supervisor check passed", 17 + i * 4);
             oath.supervisors.push(supervisor);
         }
         
-        emit DebugLog("All supervisor validations passed", 100);
-        
         // 创建者质押奖励金额（使用统一代币）
-        emit DebugLog("Starting transferFrom operation", 101);
         require(oath.token.transferFrom(msg.sender, address(this), _oath.totalReward), "Creator stake transfer failed");
-        emit DebugLog("TransferFrom operation completed", 102);
         creatorStakes[oathId].amounts[msg.sender] = _oath.totalReward;
         creatorStakes[oathId].hasStaked[msg.sender] = true;
         
@@ -245,14 +236,6 @@ contract ChainOathSecure is ReentrancyGuard, Ownable, Pausable {
         require(oath.creator != address(0), "Oath does not exist");
         require(msg.sender == oath.committer, "Only committer can stake");
         require(oath.status == OathStatus.Pending, "Oath is not in pending status");
-        
-        // 先检查状态，如果时间已过则设为Aborted
-        if (block.timestamp >= oath.startTime) {
-            oath.status = OathStatus.Aborted;
-            emit OathAborted(_oathId);
-            revert("Staking period has ended");
-        }
-        
         require(!committerStakes[_oathId].hasStaked[msg.sender], "Already staked");
         require(_amount >= oath.committerStake, "Insufficient stake amount");
         
@@ -275,7 +258,6 @@ contract ChainOathSecure is ReentrancyGuard, Ownable, Pausable {
         require(oath.creator != address(0), "Oath does not exist");
         require(_isSupervisor(_oathId, msg.sender), "Not a supervisor");
         require(oath.status == OathStatus.Pending, "Oath is not in pending status");
-        require(block.timestamp < oath.startTime, "Staking period has ended");
         require(!supervisorStakes[_oathId].hasStaked[msg.sender], "Already staked");
         require(_amount >= oath.supervisorStake, "Insufficient stake amount");
         
@@ -291,75 +273,89 @@ contract ChainOathSecure is ReentrancyGuard, Ownable, Pausable {
     }
     
     /**
-     * 监督者提交检查结果
+     * 守约人完成检查点
      */
-    function submitSupervision(uint256 _oathId, bool _approval) external nonReentrant whenNotPaused {
+    function completeCheckpoint(uint256 _oathId) external nonReentrant whenNotPaused {
         Oath storage oath = oaths[_oathId];
         require(oath.creator != address(0), "Oath does not exist");
-        require(_isSupervisor(_oathId, msg.sender), "Not a supervisor");
-        require(supervisorStakes[_oathId].hasStaked[msg.sender], "Supervisor not staked");
-        require(oath.status == OathStatus.Accepted, "Oath is not active");
-        require(!supervisorStatuses[_oathId][msg.sender].isDisqualified, "Supervisor is disqualified");
-        
-        uint16 currentRound = _getCurrentRound(_oathId);
-        require(currentRound > 0 && currentRound <= oath.checkRoundsCount, "Invalid round");
-        
-        uint32 roundStartTime = oath.startTime + (currentRound - 1) * oath.checkInterval;
-        require(block.timestamp >= roundStartTime, "Round not started yet");
-        require(block.timestamp <= roundStartTime + oath.checkWindow, "Check window has passed");
-        
-        SupervisionRecord storage record = supervisionRecords[_oathId][currentRound];
-        require(!record.hasChecked[msg.sender], "Already submitted for this round");
-        
-        // 更新状态（防止重入）
-        record.hasChecked[msg.sender] = true;
-        record.approvals[msg.sender] = _approval;
-        record.totalChecked++;
-        
-        if (_approval) {
-            record.totalApproved++;
-            supervisorStatuses[_oathId][msg.sender].successfulChecks++;
-        }
-        
-        emit SupervisionSubmitted(_oathId, currentRound, msg.sender, _approval);
-        
-        _processRoundCompletion(_oathId, currentRound);
-    }
-    
-    /**
-     * 处理超时的监督轮次
-     */
-    function processTimeoutRound(uint256 _oathId) external whenNotPaused {
-        Oath storage oath = oaths[_oathId];
-        require(oath.creator != address(0), "Oath does not exist");
+        require(msg.sender == oath.committer, "Only committer can complete checkpoints");
         require(oath.status == OathStatus.Accepted, "Oath is not active");
         
-        uint16 currentRound = _getCurrentRound(_oathId);
-        require(currentRound > 0 && currentRound <= oath.checkRoundsCount, "Invalid round");
+        uint16 currentIndex = currentCheckpointIndex[_oathId];
+        require(currentIndex < oath.checkpoints.length, "All checkpoints completed");
+        require(!oath.checkpoints[currentIndex].isCompleted, "Checkpoint already completed");
         
-        uint32 roundStartTime = oath.startTime + (currentRound - 1) * oath.checkInterval;
-        require(block.timestamp > roundStartTime + oath.checkWindow, "Check window not passed yet");
+        // 完成当前检查点
+        oath.checkpoints[currentIndex].isCompleted = true;
+        oath.checkpoints[currentIndex].completedBy = msg.sender;
         
-        SupervisionRecord storage record = supervisionRecords[_oathId][currentRound];
-        require(!record.isCompleted, "Round already completed");
-        
-        // 处理未提交的监督者
+        // 更新所有监督者的成功检查计数
         for (uint i = 0; i < oath.supervisors.length; i++) {
             address supervisor = oath.supervisors[i];
-            if (supervisorStakes[_oathId].hasStaked[supervisor] && 
-                !supervisorStatuses[_oathId][supervisor].isDisqualified &&
-                !record.hasChecked[supervisor]) {
-                
-                supervisorStatuses[_oathId][supervisor].missCount++;
-                
-                if (supervisorStatuses[_oathId][supervisor].missCount > oath.maxSupervisorMisses) {
-                    supervisorStatuses[_oathId][supervisor].isDisqualified = true;
-                }
+            if (!supervisorStatuses[_oathId][supervisor].isDisqualified) {
+                supervisorStatuses[_oathId][supervisor].successfulChecks++;
             }
         }
         
-        _processRoundCompletion(_oathId, currentRound);
+        emit CheckpointCompleted(_oathId, currentIndex, msg.sender);
+        
+        // 移动到下一个检查点
+        currentCheckpointIndex[_oathId]++;
+        
+        // 检查是否所有检查点都已完成
+        if (currentCheckpointIndex[_oathId] >= oath.checkpoints.length) {
+            oath.status = OathStatus.Fulfilled;
+            emit OathFulfilled(_oathId);
+        }
     }
+    
+    /**
+     * 点赞誓约
+     */
+    function likeOath(uint256 _oathId) external {
+        Oath storage oath = oaths[_oathId];
+        require(oath.creator != address(0), "Oath does not exist");
+        require(!hasLiked[_oathId][msg.sender], "Already liked");
+        
+        hasLiked[_oathId][msg.sender] = true;
+        oath.likesCount++;
+        
+        emit OathLiked(_oathId, msg.sender);
+    }
+    
+    /**
+     * 取消点赞
+     */
+    function unlikeOath(uint256 _oathId) external {
+        Oath storage oath = oaths[_oathId];
+        require(oath.creator != address(0), "Oath does not exist");
+        require(hasLiked[_oathId][msg.sender], "Not liked yet");
+        
+        hasLiked[_oathId][msg.sender] = false;
+        oath.likesCount--;
+        
+        emit OathUnliked(_oathId, msg.sender);
+    }
+    
+    /**
+     * 添加评论
+     */
+    function addComment(uint256 _oathId, string memory _content) external {
+        Oath storage oath = oaths[_oathId];
+        require(oath.creator != address(0), "Oath does not exist");
+        require(bytes(_content).length > 0, "Comment cannot be empty");
+        require(bytes(_content).length <= 500, "Comment too long");
+        
+        oath.comments.push(Comment({
+            author: msg.sender,
+            content: _content,
+            timestamp: uint32(block.timestamp)
+        }));
+        
+        emit CommentAdded(_oathId, msg.sender, _content);
+    }
+    
+
     
     /**
      * 领取奖励（修复版本）
@@ -383,14 +379,11 @@ contract ChainOathSecure is ReentrancyGuard, Ownable, Pausable {
     /**
      * 检查并更新誓约状态
      */
-    function checkOathStatus(uint256 _oathId) external {
+    function checkOathStatus(uint256 _oathId) external view returns (OathStatus) {
         Oath storage oath = oaths[_oathId];
         require(oath.creator != address(0), "Oath does not exist");
         
-        if (oath.status == OathStatus.Pending && block.timestamp >= oath.startTime) {
-            oath.status = OathStatus.Aborted;
-            emit OathAborted(_oathId);
-        }
+        return oath.status;
     }
     
     /**
@@ -457,12 +450,6 @@ contract ChainOathSecure is ReentrancyGuard, Ownable, Pausable {
     function _checkOathAcceptance(uint256 _oathId) internal {
         Oath storage oath = oaths[_oathId];
         
-        if (block.timestamp >= oath.startTime) {
-            oath.status = OathStatus.Aborted;
-            emit OathAborted(_oathId);
-            return;
-        }
-        
         // 检查守约人是否已质押
         if (!committerStakes[_oathId].hasStaked[oath.committer]) {
             return;
@@ -480,77 +467,7 @@ contract ChainOathSecure is ReentrancyGuard, Ownable, Pausable {
         emit OathAccepted(_oathId);
     }
     
-    /**
-     * 获取当前轮次
-     */
-    function _getCurrentRound(uint256 _oathId) internal view returns (uint16) {
-        Oath storage oath = oaths[_oathId];
-        if (block.timestamp < oath.startTime) {
-            return 0;
-        }
-        if (block.timestamp >= oath.endTime) {
-            return oath.checkRoundsCount;
-        }
-        
-        uint32 elapsed = uint32(block.timestamp) - oath.startTime;
-        return uint16(elapsed / oath.checkInterval) + 1;
-    }
-    
-    /**
-     * 处理轮次完成
-     */
-    function _processRoundCompletion(uint256 _oathId, uint16 _round) internal {
-        Oath storage oath = oaths[_oathId];
-        SupervisionRecord storage record = supervisionRecords[_oathId][_round];
-        
-        if (record.isCompleted) {
-            return;
-        }
-        
-        // 计算有效监督者数量
-        uint16 validSupervisors = 0;
-        for (uint i = 0; i < oath.supervisors.length; i++) {
-            address supervisor = oath.supervisors[i];
-            if (supervisorStakes[_oathId].hasStaked[supervisor] && 
-                !supervisorStatuses[_oathId][supervisor].isDisqualified) {
-                validSupervisors++;
-            }
-        }
-        
-        // 检查是否所有有效监督者都已提交或超时
-        bool allSubmitted = (record.totalChecked >= validSupervisors);
-        uint32 roundStartTime = oath.startTime + (_round - 1) * oath.checkInterval;
-        bool timeoutPassed = (block.timestamp > roundStartTime + oath.checkWindow);
-        
-        if (!allSubmitted && !timeoutPassed) {
-            return;
-        }
-        
-        record.isCompleted = true;
-        
-        // 判断本轮是否成功
-        if (validSupervisors > 0) {
-            uint16 approvalPercent = (record.totalApproved * 100) / validSupervisors;
-            record.isSuccess = (approvalPercent >= oath.checkThresholdPercent);
-        } else {
-            record.isSuccess = false;
-        }
-        
-        if (!record.isSuccess) {
-            committerFailures[_oathId]++;
-            if (committerFailures[_oathId] > oath.maxCommitterFailures) {
-                oath.status = OathStatus.Broken;
-                emit OathBroken(_oathId);
-                return;
-            }
-        }
-        
-        // 检查是否完成所有轮次
-        if (_round >= oath.checkRoundsCount) {
-            oath.status = OathStatus.Fulfilled;
-            emit OathFulfilled(_oathId);
-        }
-    }
+
     
     /**
      * 守约人领取奖励（修复版本）
@@ -693,10 +610,71 @@ contract ChainOathSecure is ReentrancyGuard, Ownable, Pausable {
     }
     
     /**
-     * 获取当前轮次
+     * 获取当前检查点索引
      */
-    function getCurrentRound(uint256 _oathId) external view returns (uint16) {
-        return _getCurrentRound(_oathId);
+    function getCurrentCheckpointIndex(uint256 _oathId) external view returns (uint16) {
+        return currentCheckpointIndex[_oathId];
+    }
+    
+    /**
+     * 获取检查点信息
+     */
+    function getCheckpoint(uint256 _oathId, uint16 _index) external view returns (
+        string memory description,
+        bool isCompleted,
+        address completedBy
+    ) {
+        require(_index < oaths[_oathId].checkpoints.length, "Checkpoint index out of bounds");
+        Checkpoint storage checkpoint = oaths[_oathId].checkpoints[_index];
+        return (checkpoint.description, checkpoint.isCompleted, checkpoint.completedBy);
+    }
+    
+    /**
+     * 获取所有检查点
+     */
+    function getAllCheckpoints(uint256 _oathId) external view returns (Checkpoint[] memory) {
+        return oaths[_oathId].checkpoints;
+    }
+    
+    /**
+     * 获取点赞数量
+     */
+    function getLikesCount(uint256 _oathId) external view returns (uint32) {
+        return oaths[_oathId].likesCount;
+    }
+    
+    /**
+     * 检查用户是否已点赞
+     */
+    function getHasLiked(uint256 _oathId, address _user) external view returns (bool) {
+        return hasLiked[_oathId][_user];
+    }
+    
+    /**
+     * 获取评论数量
+     */
+    function getCommentsCount(uint256 _oathId) external view returns (uint256) {
+        return oaths[_oathId].comments.length;
+    }
+    
+    /**
+     * 获取特定评论
+     */
+    function getComment(uint256 _oathId, uint256 _index) external view returns (
+        address author,
+        string memory content,
+        uint32 timestamp
+    ) {
+        require(_index < oaths[_oathId].comments.length, "Comment index out of bounds");
+        Comment storage comment = oaths[_oathId].comments[_index];
+        return (comment.author, comment.content, comment.timestamp);
+    }
+    
+    /**
+     * 获取所有评论
+     */
+    function getAllComments(uint256 _oathId) external view returns (Comment[] memory) {
+        return oaths[_oathId].comments;
     }
     
     /**
@@ -737,5 +715,157 @@ contract ChainOathSecure is ReentrancyGuard, Ownable, Pausable {
      */
     function getContractTokenBalance(address _token) external view returns (uint256) {
         return IERC20(_token).balanceOf(address(this));
+    }
+    
+    /**
+     * 获取誓约总数
+     */
+    function oathCounter() external view returns (uint256) {
+        return nextOathId;
+    }
+    
+    // ========== 管理员测试函数 (仅用于测试环境) ==========
+    
+    /**
+     * [管理员专用] 强制完成当前检查点
+     */
+    function _adminForceCompleteCheckpoint(uint256 _oathId) external onlyOwner {
+        require(_oathId < nextOathId, "Invalid oath ID");
+        Oath storage oath = oaths[_oathId];
+        require(oath.status == OathStatus.Accepted, "Oath not in accepted status");
+        
+        uint16 currentIndex = currentCheckpointIndex[_oathId];
+        require(currentIndex < oath.checkpoints.length, "All checkpoints completed");
+        
+        // 强制完成当前检查点
+        oath.checkpoints[currentIndex].isCompleted = true;
+        oath.checkpoints[currentIndex].completedTime = uint32(block.timestamp);
+        oath.checkpoints[currentIndex].completedBy = msg.sender;
+        
+        // 更新检查点索引
+        currentCheckpointIndex[_oathId]++;
+        
+        // 如果所有检查点都完成了，设置为已履行状态
+        if (currentCheckpointIndex[_oathId] >= oath.checkpoints.length) {
+            oath.status = OathStatus.Fulfilled;
+            emit OathFulfilled(_oathId);
+        }
+        
+        emit CheckpointCompleted(_oathId, currentIndex, msg.sender);
+    }
+    
+    /**
+     * [管理员专用] 强制设置誓约状态
+     */
+    function _adminSetOathStatus(uint256 _oathId, OathStatus _status) external onlyOwner {
+        require(_oathId < nextOathId, "Invalid oath ID");
+        oaths[_oathId].status = _status;
+        
+        if (_status == OathStatus.Fulfilled) {
+            emit OathFulfilled(_oathId);
+        } else if (_status == OathStatus.Broken) {
+            emit OathBroken(_oathId);
+        } else if (_status == OathStatus.Aborted) {
+            emit OathAborted(_oathId);
+        }
+    }
+    
+    /**
+     * [管理员专用] 跳过时间限制，直接进入下一阶段
+     */
+    function _adminSkipToNextPhase(uint256 _oathId) external onlyOwner {
+        require(_oathId < nextOathId, "Invalid oath ID");
+        Oath storage oath = oaths[_oathId];
+        
+        if (oath.status == OathStatus.Pending) {
+            // 跳过质押阶段，直接接受
+            oath.status = OathStatus.Accepted;
+            emit OathAccepted(_oathId);
+        } else if (oath.status == OathStatus.Accepted) {
+            // 跳过所有检查点，直接完成
+            for (uint16 i = 0; i < oath.checkpoints.length; i++) {
+                if (!oath.checkpoints[i].isCompleted) {
+                    oath.checkpoints[i].isCompleted = true;
+                    oath.checkpoints[i].completedTime = uint32(block.timestamp);
+                    oath.checkpoints[i].completedBy = msg.sender;
+                }
+            }
+            currentCheckpointIndex[_oathId] = uint16(oath.checkpoints.length);
+            oath.status = OathStatus.Fulfilled;
+            emit OathFulfilled(_oathId);
+        }
+    }
+    
+    /**
+     * [管理员专用] 重置誓约到初始状态
+     */
+    function _adminResetOath(uint256 _oathId) external onlyOwner {
+        require(_oathId < nextOathId, "Invalid oath ID");
+        Oath storage oath = oaths[_oathId];
+        
+        // 重置状态
+        oath.status = OathStatus.Pending;
+        currentCheckpointIndex[_oathId] = 0;
+        committerFailures[_oathId] = 0;
+        
+        // 重置所有检查点
+        for (uint16 i = 0; i < oath.checkpoints.length; i++) {
+            oath.checkpoints[i].isCompleted = false;
+            oath.checkpoints[i].completedTime = 0;
+            oath.checkpoints[i].completedBy = address(0);
+        }
+        
+        // 重置监督者状态
+        for (uint16 i = 0; i < oath.supervisors.length; i++) {
+            address supervisor = oath.supervisors[i];
+            supervisorStatuses[_oathId][supervisor].missCount = 0;
+            supervisorStatuses[_oathId][supervisor].successfulChecks = 0;
+            supervisorStatuses[_oathId][supervisor].isDisqualified = false;
+        }
+        
+        // 重置奖励分配
+        rewardDistributions[_oathId].committerRewardClaimed = 0;
+        rewardDistributions[_oathId].supervisorRewardClaimed = 0;
+        rewardDistributions[_oathId].creatorRefundClaimed = 0;
+        rewardDistributions[_oathId].isDistributionCompleted = false;
+    }
+    
+    /**
+     * [管理员专用] 强制设置检查点索引
+     */
+    function _adminSetCheckpointIndex(uint256 _oathId, uint16 _index) external onlyOwner {
+        require(_oathId < nextOathId, "Invalid oath ID");
+        require(_index <= oaths[_oathId].checkpoints.length, "Index out of bounds");
+        currentCheckpointIndex[_oathId] = _index;
+    }
+    
+    /**
+     * [管理员专用] 强制添加监督者
+     */
+    function _adminAddSupervisor(uint256 _oathId, address _supervisor) external onlyOwner {
+        require(_oathId < nextOathId, "Invalid oath ID");
+        require(_supervisor != address(0), "Invalid supervisor address");
+        require(oaths[_oathId].supervisors.length < MAX_SUPERVISORS, "Too many supervisors");
+        
+        oaths[_oathId].supervisors.push(_supervisor);
+    }
+    
+    /**
+     * [管理员专用] 获取管理员测试信息
+     */
+    function _adminGetTestInfo(uint256 _oathId) external view onlyOwner returns (
+        OathStatus status,
+        uint16 currentIndex,
+        uint16 totalCheckpoints,
+        uint16 failures
+    ) {
+        require(_oathId < nextOathId, "Invalid oath ID");
+        Oath storage oath = oaths[_oathId];
+        return (
+            oath.status,
+            currentCheckpointIndex[_oathId],
+            uint16(oath.checkpoints.length),
+            committerFailures[_oathId]
+        );
     }
 }

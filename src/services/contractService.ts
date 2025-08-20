@@ -21,6 +21,31 @@ export interface OathData {
 }
 
 /**
+ * 评论数据接口
+ */
+export interface CommentData {
+  author: string;
+  content: string;
+  timestamp: number;
+}
+
+/**
+ * 检查点数据接口
+ */
+export interface CheckpointData {
+  description: string;
+  isCompleted: boolean;
+  completedAt: number;
+}
+
+/**
+ * 测试信息接口
+ */
+export interface TestInfo {
+  [key: string]: unknown;
+}
+
+/**
  * 智能合约交互服务
  */
 export class ContractService {
@@ -1392,6 +1417,395 @@ export class ContractService {
       return hasStaked || isCreator;
     } catch (error) {
       console.error('检查奖励领取权限失败:', error);
+      return false;
+    }
+  }
+
+  /**
+   * 点赞誓约
+   */
+  async likeOath(oathId: string): Promise<ethers.TransactionResponse> {
+    try {
+      if (!this.chainOathContract) {
+        throw new Error('合约未初始化');
+      }
+
+      console.log(`点赞誓约: 誓约ID ${oathId}`);
+      const tx = await this.chainOathContract.likeOath(oathId);
+      
+      console.log('点赞交易已提交:', tx.hash);
+      return tx;
+    } catch (error) {
+      console.error('点赞誓约失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 取消点赞誓约
+   */
+  async unlikeOath(oathId: string): Promise<ethers.TransactionResponse> {
+    try {
+      if (!this.chainOathContract) {
+        throw new Error('合约未初始化');
+      }
+
+      console.log(`取消点赞誓约: 誓约ID ${oathId}`);
+      const tx = await this.chainOathContract.unlikeOath(oathId);
+      
+      console.log('取消点赞交易已提交:', tx.hash);
+      return tx;
+    } catch (error) {
+      console.error('取消点赞誓约失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取誓约点赞数
+   */
+  async getOathLikes(oathId: string): Promise<number> {
+    try {
+      if (!this.chainOathContract) {
+        throw new Error('合约未初始化');
+      }
+
+      const likesCount = await this.chainOathContract.getOathLikes(oathId);
+      console.log(`誓约 ${oathId} 的点赞数:`, likesCount.toString());
+      
+      return Number(likesCount);
+    } catch (error) {
+      console.error('获取誓约点赞数失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 检查用户是否已点赞誓约
+   */
+  async hasUserLiked(oathId: string, userAddress: string): Promise<boolean> {
+    try {
+      if (!this.chainOathContract) {
+        throw new Error('合约未初始化');
+      }
+
+      const hasLiked = await this.chainOathContract.hasLiked(oathId, userAddress);
+      console.log(`用户 ${userAddress} 是否已点赞誓约 ${oathId}:`, hasLiked);
+      
+      return hasLiked;
+    } catch (error) {
+      console.error('检查用户点赞状态失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 添加评论
+   */
+  async addComment(oathId: string, content: string): Promise<ethers.TransactionResponse> {
+    try {
+      if (!this.chainOathContract) {
+        throw new Error('合约未初始化');
+      }
+
+      console.log(`添加评论: 誓约ID ${oathId}, 内容: ${content}`);
+      const tx = await this.chainOathContract.addComment(oathId, content);
+      
+      console.log('添加评论交易已提交:', tx.hash);
+      return tx;
+    } catch (error) {
+      console.error('添加评论失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取誓约评论
+   */
+  async getOathComments(oathId: string): Promise<Array<{
+    author: string;
+    content: string;
+    timestamp: number;
+  }>> {
+    try {
+      if (!this.chainOathContract) {
+        throw new Error('合约未初始化');
+      }
+
+      const comments = await this.chainOathContract.getOathComments(oathId);
+      console.log(`誓约 ${oathId} 的评论:`, comments);
+      
+      return comments.map((comment: CommentData) => ({
+        author: comment.author,
+        content: comment.content,
+        timestamp: Number(comment.timestamp)
+      }));
+    } catch (error) {
+      console.error('获取誓约评论失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取誓约评论数量
+   */
+  async getOathCommentsCount(oathId: string): Promise<number> {
+    try {
+      if (!this.chainOathContract) {
+        throw new Error('合约未初始化');
+      }
+
+      const count = await this.chainOathContract.getOathCommentsCount(oathId);
+      console.log(`誓约 ${oathId} 的评论数量:`, count.toString());
+      
+      return Number(count);
+    } catch (error) {
+      console.error('获取誓约评论数量失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 完成检查点
+   */
+  async completeCheckpoint(oathId: string, checkpointIndex: number): Promise<ethers.TransactionResponse> {
+    try {
+      if (!this.chainOathContract) {
+        throw new Error('合约未初始化');
+      }
+
+      console.log(`完成检查点: 誓约ID ${oathId}, 检查点索引 ${checkpointIndex}`);
+      const tx = await this.chainOathContract.completeCheckpoint(oathId, checkpointIndex);
+      
+      console.log('完成检查点交易已提交:', tx.hash);
+      return tx;
+    } catch (error) {
+      console.error('完成检查点失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取誓约检查点
+   */
+  async getOathCheckpoints(oathId: string): Promise<Array<{
+    description: string;
+    isCompleted: boolean;
+    completedAt: number;
+  }>> {
+    try {
+      if (!this.chainOathContract) {
+        throw new Error('合约未初始化');
+      }
+
+      const checkpoints = await this.chainOathContract.getOathCheckpoints(oathId);
+      console.log(`誓约 ${oathId} 的检查点:`, checkpoints);
+      
+      return checkpoints.map((checkpoint: CheckpointData) => ({
+        description: checkpoint.description,
+        isCompleted: checkpoint.isCompleted,
+        completedAt: Number(checkpoint.completedAt)
+      }));
+    } catch (error) {
+      console.error('获取誓约检查点失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取当前检查点索引
+   */
+  async getCurrentCheckpointIndex(oathId: string): Promise<number> {
+    try {
+      if (!this.chainOathContract) {
+        throw new Error('合约未初始化');
+      }
+
+      const index = await this.chainOathContract.getCurrentCheckpointIndex(oathId);
+      console.log(`誓约 ${oathId} 的当前检查点索引:`, index.toString());
+      
+      return Number(index);
+    } catch (error) {
+      console.error('获取当前检查点索引失败:', error);
+      throw error;
+    }
+  }
+
+  // ========== 管理员测试功能 (仅限合约所有者) ==========
+  
+  /**
+   * 管理员强制完成检查点
+   */
+  async adminForceCompleteCheckpoint(oathId: string): Promise<ethers.TransactionResponse> {
+    try {
+      if (!this.chainOathContract) {
+        throw new Error('合约未初始化');
+      }
+
+      console.log(`[管理员] 强制完成检查点: 誓约ID ${oathId}`);
+      const tx = await this.chainOathContract._adminForceCompleteCheckpoint(oathId);
+      
+      console.log('管理员强制完成检查点交易已提交:', tx.hash);
+      return tx;
+    } catch (error) {
+      console.error('管理员强制完成检查点失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 管理员设置誓约状态
+   */
+  async adminSetOathStatus(oathId: string, status: number): Promise<ethers.TransactionResponse> {
+    try {
+      if (!this.chainOathContract) {
+        throw new Error('合约未初始化');
+      }
+
+      console.log(`[管理员] 设置誓约状态: 誓约ID ${oathId}, 状态 ${status}`);
+      const tx = await this.chainOathContract._adminSetOathStatus(oathId, status);
+      
+      console.log('管理员设置誓约状态交易已提交:', tx.hash);
+      return tx;
+    } catch (error) {
+      console.error('管理员设置誓约状态失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 管理员跳过到下一阶段
+   */
+  async adminSkipToNextPhase(oathId: string): Promise<ethers.TransactionResponse> {
+    try {
+      if (!this.chainOathContract) {
+        throw new Error('合约未初始化');
+      }
+
+      console.log(`[管理员] 跳过到下一阶段: 誓约ID ${oathId}`);
+      const tx = await this.chainOathContract._adminSkipToNextPhase(oathId);
+      
+      console.log('管理员跳过到下一阶段交易已提交:', tx.hash);
+      return tx;
+    } catch (error) {
+      console.error('管理员跳过到下一阶段失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 管理员重置誓约
+   */
+  async adminResetOath(oathId: string): Promise<ethers.TransactionResponse> {
+    try {
+      if (!this.chainOathContract) {
+        throw new Error('合约未初始化');
+      }
+
+      console.log(`[管理员] 重置誓约: 誓约ID ${oathId}`);
+      const tx = await this.chainOathContract._adminResetOath(oathId);
+      
+      console.log('管理员重置誓约交易已提交:', tx.hash);
+      return tx;
+    } catch (error) {
+      console.error('管理员重置誓约失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 管理员设置检查点索引
+   */
+  async adminSetCheckpointIndex(oathId: string, index: number): Promise<ethers.TransactionResponse> {
+    try {
+      if (!this.chainOathContract) {
+        throw new Error('合约未初始化');
+      }
+
+      console.log(`[管理员] 设置检查点索引: 誓约ID ${oathId}, 索引 ${index}`);
+      const tx = await this.chainOathContract._adminSetCheckpointIndex(oathId, index);
+      
+      console.log('管理员设置检查点索引交易已提交:', tx.hash);
+      return tx;
+    } catch (error) {
+      console.error('管理员设置检查点索引失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 管理员添加监督者
+   */
+  async adminAddSupervisor(oathId: string, supervisor: string): Promise<ethers.TransactionResponse> {
+    try {
+      if (!this.chainOathContract) {
+        throw new Error('合约未初始化');
+      }
+
+      console.log(`[管理员] 添加监督者: 誓约ID ${oathId}, 监督者 ${supervisor}`);
+      const tx = await this.chainOathContract._adminAddSupervisor(oathId, supervisor);
+      
+      console.log('管理员添加监督者交易已提交:', tx.hash);
+      return tx;
+    } catch (error) {
+      console.error('管理员添加监督者失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 管理员获取测试信息
+   */
+  async adminGetTestInfo(oathId: string): Promise<TestInfo> {
+    try {
+      if (!this.chainOathContract) {
+        throw new Error('合约未初始化');
+      }
+
+      const testInfo = await this.chainOathContract._adminGetTestInfo(oathId);
+      console.log(`[管理员] 誓约 ${oathId} 的测试信息:`, testInfo);
+      
+      return testInfo;
+    } catch (error) {
+      console.error('管理员获取测试信息失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取合约所有者地址
+   */
+  async getContractOwner(): Promise<string> {
+    try {
+      if (!this.chainOathContract) {
+        throw new Error('合约未初始化');
+      }
+
+      const owner = await this.chainOathContract.owner();
+      console.log('合约所有者地址:', owner);
+      return owner;
+    } catch (error) {
+      console.error('获取合约所有者失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 检查当前用户是否为合约所有者
+   */
+  async isContractOwner(userAddress?: string): Promise<boolean> {
+    try {
+      const currentAddress = userAddress || await this.getCurrentAddress();
+      if (!currentAddress) {
+        return false;
+      }
+
+      const owner = await this.getContractOwner();
+      const isOwner = currentAddress.toLowerCase() === owner.toLowerCase();
+      console.log(`用户 ${currentAddress} 是否为合约所有者:`, isOwner);
+      return isOwner;
+    } catch (error) {
+      console.error('检查合约所有者权限失败:', error);
       return false;
     }
   }

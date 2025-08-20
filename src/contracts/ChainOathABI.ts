@@ -91,6 +91,13 @@ export const ChainOathSecureABI = [
   },
   {
     "type": "function",
+    "name": "owner",
+    "inputs": [],
+    "outputs": [{ "name": "", "type": "address" }],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "emergencyPause",
     "inputs": [],
     "outputs": [],

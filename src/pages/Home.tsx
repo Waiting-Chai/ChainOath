@@ -26,6 +26,7 @@ import {
 import { publicContractService } from "../services/publicContractService";
 import OathCard from "../components/OathCard"; // 导入新的 OathCard 组件
 import type { Oath } from "../components/OathCard"; // 导入 Oath 类型
+import LikeRanking from "../components/LikeRanking";
 
 const Home: React.FC = () => {
   const navigator = useNavigate();
@@ -65,8 +66,9 @@ const Home: React.FC = () => {
   // 平台统计数据
   const [platformStats, setPlatformStats] = React.useState<{
     active: number;
-    successRate: number;
-    users: number;
+    failed: number;
+    notStarted: number;
+    completed: number;
   } | null>(null);
   const [loadingStats, setLoadingStats] = React.useState(false);
 
@@ -281,6 +283,9 @@ const Home: React.FC = () => {
             <Button color="inherit" sx={{ mx: 1 }}>
               探索
             </Button>
+            <Button color="inherit" sx={{ mx: 1 }} component={RouterLink} to="/achievements">
+              成就中心
+            </Button>
             <Button color="inherit" sx={{ mx: 1 }} component={RouterLink} to="/notifications">
               通知中心
             </Button>
@@ -441,93 +446,103 @@ const Home: React.FC = () => {
         {/* Stats Section（简化保留，避免过多介绍） */}
         <Box sx={{ py: { xs: 6, md: 8 }, bgcolor: "background.paper" }}>
           <Container maxWidth="lg">
-            {loadingStats ? (
-              <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
-                <CircularProgress />
+            <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 4 }}>
+              {/* 统计数据 */}
+              <Box sx={{ flex: { xs: '1 1 100%', md: '2 1 66%' } }}>
+                {loadingStats ? (
+                  <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
+                    <CircularProgress />
+                  </Box>
+                ) : (
+                  <Box 
+                    sx={{ 
+                      display: "flex", 
+                      flexWrap: "wrap", 
+                      gap: 4, 
+                      justifyContent: "center" 
+                    }}
+                  >
+                    <Box sx={{ textAlign: "center", minWidth: 150 }}>
+                      <Typography
+                        variant="h3"
+                        component="div"
+                        sx={{
+                          fontWeight: "bold",
+                          background: "linear-gradient(90deg, #4F46E5, #6366F1)",
+                          WebkitBackgroundClip: "text",
+                          WebkitTextFillColor: "transparent",
+                          mb: 1,
+                        }}
+                      >
+                        {platformStats?.active ?? "--"}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        活跃数目
+                      </Typography>
+                    </Box>
+                    <Box sx={{ textAlign: "center", minWidth: 150 }}>
+                      <Typography
+                        variant="h3"
+                        component="div"
+                        sx={{
+                          fontWeight: "bold",
+                          background: "linear-gradient(90deg, #E53E3E, #F56565)",
+                          WebkitBackgroundClip: "text",
+                          WebkitTextFillColor: "transparent",
+                          mb: 1,
+                        }}
+                      >
+                        {platformStats?.failed ?? "--"}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        失败数目
+                      </Typography>
+                    </Box>
+                    <Box sx={{ textAlign: "center", minWidth: 150 }}>
+                      <Typography
+                        variant="h3"
+                        component="div"
+                        sx={{
+                          fontWeight: "bold",
+                          background: "linear-gradient(90deg, #718096, #A0AEC0)",
+                          WebkitBackgroundClip: "text",
+                          WebkitTextFillColor: "transparent",
+                          mb: 1,
+                        }}
+                      >
+                        {platformStats?.notStarted ?? "--"}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        未开始数目
+                      </Typography>
+                    </Box>
+                    <Box sx={{ textAlign: "center", minWidth: 150 }}>
+                      <Typography
+                        variant="h3"
+                        component="div"
+                        sx={{
+                          fontWeight: "bold",
+                          background: "linear-gradient(90deg, #38A169, #68D391)",
+                          WebkitBackgroundClip: "text",
+                          WebkitTextFillColor: "transparent",
+                          mb: 1,
+                        }}
+                      >
+                        {platformStats?.completed ?? "--"}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        完成数目
+                      </Typography>
+                    </Box>
+                  </Box>
+                )}
               </Box>
-            ) : (
-              <Box 
-                sx={{ 
-                  display: "flex", 
-                  flexWrap: "wrap", 
-                  gap: 4, 
-                  justifyContent: "center" 
-                }}
-              >
-                <Box sx={{ textAlign: "center", minWidth: 150 }}>
-                  <Typography
-                    variant="h3"
-                    component="div"
-                    sx={{
-                      fontWeight: "bold",
-                      background: "linear-gradient(90deg, #4F46E5, #6366F1)",
-                      WebkitBackgroundClip: "text",
-                      WebkitTextFillColor: "transparent",
-                      mb: 1,
-                    }}
-                  >
-                    {platformStats?.active ?? "--"}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    活跃誓约
-                  </Typography>
-                </Box>
-                <Box sx={{ textAlign: "center", minWidth: 150 }}>
-                  <Typography
-                    variant="h3"
-                    component="div"
-                    sx={{
-                      fontWeight: "bold",
-                      background: "linear-gradient(90deg, #4F46E5, #6366F1)",
-                      WebkitBackgroundClip: "text",
-                      WebkitTextFillColor: "transparent",
-                      mb: 1,
-                    }}
-                  >
-                    {platformStats?.successRate ? `${platformStats.successRate}%` : "--"}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    履约成功率
-                  </Typography>
-                </Box>
-                <Box sx={{ textAlign: "center", minWidth: 150 }}>
-                  <Typography
-                    variant="h3"
-                    component="div"
-                    sx={{
-                      fontWeight: "bold",
-                      background: "linear-gradient(90deg, #4F46E5, #6366F1)",
-                      WebkitBackgroundClip: "text",
-                      WebkitTextFillColor: "transparent",
-                      mb: 1,
-                    }}
-                  >
-                    {platformStats?.users ?? "--"}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    注册用户
-                  </Typography>
-                </Box>
-                <Box sx={{ textAlign: "center", minWidth: 150 }}>
-                  <Typography
-                    variant="h3"
-                    component="div"
-                    sx={{
-                      fontWeight: "bold",
-                      background: "linear-gradient(90deg, #4F46E5, #6366F1)",
-                      WebkitBackgroundClip: "text",
-                      WebkitTextFillColor: "transparent",
-                      mb: 1,
-                    }}
-                  >
-                    24/7
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    链上监控
-                  </Typography>
-                </Box>
+              
+              {/* 点赞排行榜 */}
+              <Box sx={{ flex: { xs: '1 1 100%', md: '1 1 33%' } }}>
+                <LikeRanking limit={8} />
               </Box>
-            )}
+            </Box>
           </Container>
         </Box>
       </Box>

@@ -7,7 +7,6 @@ import {
   Button,
   Chip,
   Container,
-  Divider,
   LinearProgress,
   List,
   ListItem,
@@ -19,23 +18,26 @@ import {
   CircularProgress,
   Alert,
   Menu,
-  MenuItem
+  MenuItem,
+  TextField,
+  IconButton,
+  Badge
 } from '@mui/material';
 import {
   Link as LinkIcon,
   CheckCircle as CheckCircleIcon,
   Cancel as CancelIcon,
   AccessTime as AccessTimeIcon,
-  CalendarToday as CalendarTodayIcon,
   AccountBalanceWallet as AccountBalanceWalletIcon,
   Person as PersonIcon,
-  Comment as CommentIcon,
-  ArrowBack as ArrowBackIcon
+  ArrowBack as ArrowBackIcon,
+  ThumbUp as ThumbUpIcon,
+  ThumbUpOutlined as ThumbUpOutlinedIcon,
+  Send as SendIcon
 } from '@mui/icons-material';
 import { contractService } from '../services/contractService';
 import { ethers } from 'ethers';
 import { getCurrentNetworkConfig } from '../contracts/config';
-import CountdownTimer from '../components/CountdownTimer';
 import {
   Star as StarIcon,
   Gavel as GavelIcon,
@@ -54,9 +56,13 @@ interface OathDetailData {
   description: string;
   status: 'pending' | 'active' | 'completed' | 'failed' | 'aborted';
   progress: number;
-  startDate: string;
-  deadline: string;
   stake: string;
+  startDate?: string;
+  deadline?: string;
+  startTime?: number;
+  endTime?: number;
+  checkInterval?: number;
+  checkWindow?: number;
   creator: {
     name: string;
     avatar: string;
@@ -71,25 +77,65 @@ interface OathDetailData {
   committers: string[];
   supervisors: string[];
   checkpoints: Array<{
-    date: string;
     title: string;
     description: string;
-    status: string;
-    timestamp: number;
+    status: 'completed' | 'active' | 'pending';
+    completedBy?: string;
+    completedAt?: number;
   }>;
-  updates: Array<{
-    date: string;
+  likes: number;
+  hasLiked: boolean;
+  comments: Array<{
+    id: string;
     user: string;
+    userAddress: string;
     avatar: string;
     content: string;
-    attachments: string[];
+    timestamp: number;
+    date: string;
   }>;
   contractAddress?: string;
-  checkInterval: number;
-  checkWindow: number;
+}
+
+interface CheckTimeInfo {
+  isInCheckWindow: boolean;
+  timeUntilCheckWindowEnd: number;
+  timeUntilNextCheck: number;
+  nextCheckTime: number;
+}
+
+interface CommentData {
+  author: string;
+  content: string;
+  timestamp: number;
+}
+
+// 计算检查点的辅助函数
+const calculateCheckpoints = (params: {
   startTime: number;
   endTime: number;
-}
+  checkInterval: number;
+  checkWindow: number;
+}) => {
+  const checkpoints = [];
+  const startTimestamp = Number(params.startTime);
+  const endTimestamp = Number(params.endTime);
+  const duration = endTimestamp - startTimestamp;
+  const numCheckpoints = Math.max(1, Math.floor(duration / params.checkInterval));
+  
+  for (let i = 0; i < numCheckpoints; i++) {
+    // const checkTime = startTimestamp + (i + 1) * params.checkInterval; // 暂时注释掉未使用的变量
+    checkpoints.push({
+      title: `检查点 ${i + 1}`,
+      description: `第 ${i + 1} 个检查点`,
+      status: 'pending' as const,
+      completedBy: undefined,
+      completedAt: undefined
+    });
+  }
+  
+  return checkpoints;
+};
 
 const OathDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -104,57 +150,66 @@ const OathDetail: React.FC = () => {
     isDisqualified: boolean;
     expectedReward: string;
   } | null>(null);
-  const [checkTimeInfo, setCheckTimeInfo] = useState<{
-    nextCheckTime: number;
-    timeUntilNextCheck: number;
-    timeUntilCheckWindowEnd: number;
-    isInCheckWindow: boolean;
-  } | null>(null);
+  const [newComment, setNewComment] = useState<string>('');
+  const [commentLoading, setCommentLoading] = useState(false);
+  const [likeLoading, setLikeLoading] = useState(false);
   const [stakingEndTime, setStakingEndTime] = useState<number | null>(null);
+  const [checkTimeInfo, setCheckTimeInfo] = useState<CheckTimeInfo | null>(null);
   const [nextCheckEndTime, setNextCheckEndTime] = useState<number | null>(null);
 
-  // 计算检查点
-  const calculateCheckpoints = (oathData: {
-    startTime: number;
-    endTime: number;
-    checkInterval: number;
-    checkWindow: number;
-  }) => {
-    const checkpoints = [];
-    const startTime = oathData.startTime;
-    const endTime = oathData.endTime;
-    const checkInterval = oathData.checkInterval;
+  // 点赞功能
+  const handleLike = async () => {
+    if (!id || !userAddress || likeLoading) return;
     
-    let currentTime = startTime;
-    let index = 0;
-    
-    while (currentTime <= endTime) {
-      const date = new Date(currentTime * 1000);
-      const now = Date.now();
-      const checkpointTime = currentTime * 1000;
+    try {
+      setLikeLoading(true);
+      await contractService.likeOath(id);
       
-      let status: 'completed' | 'active' | 'pending';
-      if (checkpointTime < now - (oathData.checkWindow * 1000)) {
-        status = 'completed';
-      } else if (checkpointTime <= now && now <= checkpointTime + (oathData.checkWindow * 1000)) {
-        status = 'active';
-      } else {
-        status = 'pending';
-      }
-      
-      checkpoints.push({
-        title: `检查点 ${index + 1}`,
-        date: date.toLocaleDateString('zh-CN'),
-        description: `第 ${index + 1} 次进度检查`,
-        status,
-        timestamp: currentTime
-      });
-      
-      currentTime += checkInterval;
-      index++;
+      // 更新本地状态
+      setOath(prev => prev ? {
+        ...prev,
+        likes: prev.hasLiked ? prev.likes - 1 : prev.likes + 1,
+        hasLiked: !prev.hasLiked
+      } : null);
+    } catch (error) {
+      console.error('点赞失败:', error);
+      alert(`点赞失败: ${error instanceof Error ? error.message : '未知错误'}`);
+    } finally {
+      setLikeLoading(false);
     }
+  };
+
+  // 添加评论
+  const handleAddComment = async () => {
+    if (!id || !userAddress || !newComment.trim() || commentLoading) return;
     
-    return checkpoints;
+    try {
+      setCommentLoading(true);
+      await contractService.addComment(id, newComment.trim());
+      
+      // 添加到本地状态
+      const newCommentObj = {
+        id: Date.now().toString(),
+        user: userAddress.slice(0, 6) + '...' + userAddress.slice(-4),
+        userAddress,
+        avatar: 'https://mui.com/static/images/avatar/1.jpg',
+        content: newComment.trim(),
+        timestamp: Math.floor(Date.now() / 1000),
+        date: new Date().toLocaleDateString('zh-CN')
+      };
+      
+      setOath(prev => prev ? {
+        ...prev,
+        comments: [...prev.comments, newCommentObj]
+      } : null);
+      
+      setNewComment('');
+    } catch (error) {
+      console.error('添加评论失败:', error);
+      alert(`添加评论失败: ${error instanceof Error ? error.message : '未知错误'}`);
+    } finally {
+      setCommentLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -276,6 +331,22 @@ const OathDetail: React.FC = () => {
             checkWindow: 3600 // 1小时，从合约常量获取
           });
 
+         // 获取点赞和评论数据
+         const likes = await contractService.getOathLikes(id);
+         const hasLiked = currentUser ? await contractService.hasUserLiked(id, currentUser) : false;
+         const rawComments = await contractService.getOathComments(id);
+         
+         // 转换评论格式
+         const comments = (rawComments || []).map((comment: CommentData, index: number) => ({
+           id: `${comment.timestamp || Date.now()}-${index}`,
+           user: comment.author ? comment.author.slice(0, 6) + '...' + comment.author.slice(-4) : 'Unknown',
+           userAddress: comment.author || '',
+           avatar: 'https://mui.com/static/images/avatar/1.jpg',
+           content: comment.content || '',
+           timestamp: comment.timestamp || 0,
+           date: comment.timestamp ? new Date(comment.timestamp * 1000).toLocaleDateString('zh-CN') : ''
+         }));
+
          // 格式化数据
          const formattedOath: OathDetailData = {
            id: id,
@@ -293,7 +364,9 @@ const OathDetail: React.FC = () => {
            },
            witnesses: witnessesWithStakeStatus,
            checkpoints,
-           updates: [],
+           likes,
+           hasLiked,
+           comments: comments || [],
            contractAddress: getCurrentNetworkConfig().chainOathAddress,
             committers: oathData.committers || [],
             supervisors: oathData.supervisors || [],
@@ -640,22 +713,6 @@ const OathDetail: React.FC = () => {
               <Grid container spacing={2} sx={{ mb: 2 }}>
                 <Grid size={{xs:12, sm:6}}>
                   <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                    <CalendarTodayIcon color="action" sx={{ mr: 1 }} />
-                    <Typography variant="body2" color="text.secondary">
-                      开始日期: {oath.startDate}
-                    </Typography>
-                  </Box>
-                </Grid>
-                <Grid size={{xs:12, sm:6}}>
-                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                    <CalendarTodayIcon color="action" sx={{ mr: 1 }} />
-                    <Typography variant="body2" color="text.secondary">
-                      截止日期: {oath.deadline}
-                    </Typography>
-                  </Box>
-                </Grid>
-                <Grid size={{xs:12, sm:6}}>
-                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
                     <AccountBalanceWalletIcon color="action" sx={{ mr: 1 }} />
                     <Typography variant="body2" color="text.secondary">
                       质押金额: {oath.stake}
@@ -672,43 +729,23 @@ const OathDetail: React.FC = () => {
                 </Grid>
               </Grid>
               
-              {/* 倒计时区域 */}
-              {(stakingEndTime || nextCheckEndTime) && (
-                <Box sx={{ 
-                  p: 2, 
-                  bgcolor: 'background.paper', 
-                  borderRadius: 2, 
-                  border: '1px solid', 
-                  borderColor: 'divider',
-                  mb: 2
-                }}>
-                  <Typography variant="h6" sx={{ mb: 2, fontWeight: 'bold' }}>
-                    重要时间提醒
-                  </Typography>
-                  <Grid container spacing={2}>
-                    {stakingEndTime && (
-                      <Grid size={{xs:12, md:6}}>
-                        <CountdownTimer
-                          targetTime={stakingEndTime}
-                          title="质押截止倒计时"
-                          color="warning"
-                          size="medium"
-                        />
-                      </Grid>
-                    )}
-                    {nextCheckEndTime && (
-                      <Grid size={{xs:12, md:6}}>
-                        <CountdownTimer
-                          targetTime={nextCheckEndTime}
-                          title="监督检查窗口结束倒计时"
-                          color="error"
-                          size="medium"
-                        />
-                      </Grid>
-                    )}
-                  </Grid>
-                </Box>
-              )}
+              {/* 点赞和评论区域 */}
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
+                <IconButton 
+                  onClick={handleLike}
+                  disabled={likeLoading}
+                  color={oath.hasLiked ? 'primary' : 'default'}
+                >
+                  <Badge badgeContent={oath.likes} color="primary">
+                    {oath.hasLiked ? <ThumbUpIcon /> : <ThumbUpOutlinedIcon />}
+                  </Badge>
+                </IconButton>
+                <Typography variant="body2" color="text.secondary">
+                  {oath.likes} 个赞
+                </Typography>
+              </Box>
+              
+
               
               {/* 角色相关操作按钮 */}
               <Box sx={{ display: 'flex', gap: 2, mt: 3, flexWrap: 'wrap' }}>
@@ -861,6 +898,30 @@ const OathDetail: React.FC = () => {
                   )}
                 </Box>
               )}
+              
+              {/* 时间信息 */}
+              {(stakingEndTime || checkTimeInfo || nextCheckEndTime) && (
+                <Box sx={{ mt: 3, p: 2, bgcolor: 'warning.light', borderRadius: 1 }}>
+                  <Typography variant="subtitle2" gutterBottom>
+                    时间信息
+                  </Typography>
+                  {stakingEndTime && (
+                    <Typography variant="body2">
+                      质押截止时间: {new Date(stakingEndTime * 1000).toLocaleString('zh-CN')}
+                    </Typography>
+                  )}
+                  {checkTimeInfo && (
+                    <Typography variant="body2">
+                      检查时间信息: {JSON.stringify(checkTimeInfo)}
+                    </Typography>
+                  )}
+                  {nextCheckEndTime && (
+                    <Typography variant="body2">
+                      下次检查结束时间: {new Date(nextCheckEndTime * 1000).toLocaleString('zh-CN')}
+                    </Typography>
+                  )}
+                </Box>
+              )}
             </Paper>
             
             {/* Checkpoints */}
@@ -920,93 +981,89 @@ const OathDetail: React.FC = () => {
                       {checkpoint.title}
                     </Typography>
                     
-                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                      {checkpoint.date}
-                    </Typography>
+                    {checkpoint.completedAt && (
+                      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                        完成时间: {new Date(checkpoint.completedAt * 1000).toLocaleDateString('zh-CN')}
+                      </Typography>
+                    )}
+                    
+                    {checkpoint.completedBy && (
+                      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                        完成者: {checkpoint.completedBy.slice(0, 6)}...{checkpoint.completedBy.slice(-4)}
+                      </Typography>
+                    )}
                     
                     <Typography variant="body2">
                       {checkpoint.description}
                     </Typography>
                     
                     {getStatusChip(checkpoint.status)}
-                    
-                    {/* 监督者检查窗口信息 */}
-                    {getUserRole() === 'supervisor' && checkpoint.status === 'active' && checkTimeInfo && (
-                      <Box sx={{ mt: 1, p: 1, bgcolor: 'warning.light', borderRadius: 1 }}>
-                        <Typography variant="caption" color="warning.dark">
-                          检查窗口剩余时间: {Math.max(0, Math.floor(checkTimeInfo.timeUntilCheckWindowEnd / 60))} 分钟
-                        </Typography>
-                      </Box>
-                    )}
                   </Box>
                 ))}
               </Box>
             </Paper>
             
-            {/* Updates */}
+            {/* Comments */}
             <Paper sx={{ 
               p: 3, 
               borderRadius: 2,
               boxShadow: '0 4px 12px rgba(0,0,0,0.05)'
             }}>
               <Typography variant="h6" component="h2" sx={{ fontWeight: 'bold', mb: 3 }}>
-                进度更新
+                评论 ({oath.comments.length})
               </Typography>
               
-              {oath.updates.map((update, index) => (
-                <Box key={index} sx={{ mb: index < oath.updates.length - 1 ? 4 : 0 }}>
-                  <Box sx={{ display: 'flex', mb: 2 }}>
-                    <Avatar src={update.avatar} sx={{ mr: 2 }} />
-                    <Box>
-                      <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
-                        {update.user}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        {update.date}
+              {/* 评论列表 */}
+              {oath.comments.map((comment) => (
+                <Box key={comment.id} sx={{ mb: 3 }}>
+                  <Box sx={{ display: 'flex', mb: 1 }}>
+                    <Avatar src={comment.avatar} sx={{ mr: 2, width: 32, height: 32 }} />
+                    <Box sx={{ flex: 1 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 'bold' }}>
+                          {comment.user}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {comment.date}
+                        </Typography>
+                      </Box>
+                      <Typography variant="body2" sx={{ mt: 0.5 }}>
+                        {comment.content}
                       </Typography>
                     </Box>
                   </Box>
-                  
-                  <Typography variant="body1" sx={{ mb: 2 }}>
-                    {update.content}
-                  </Typography>
-                  
-                  {update.attachments.length > 0 && (
-                    <Box sx={{ 
-                      display: 'flex', 
-                      flexWrap: 'wrap', 
-                      gap: 1,
-                      mb: 2
-                    }}>
-                      {update.attachments.map((attachment, i) => (
-                        <Box 
-                          key={i}
-                          component="img"
-                          src={attachment}
-                          alt={`Attachment ${i}`}
-                          sx={{ 
-                            width: 200,
-                            height: 150,
-                            objectFit: 'cover',
-                            borderRadius: 1
-                          }}
-                        />
-                      ))}
-                    </Box>
-                  )}
-                  
-                  {index < oath.updates.length - 1 && <Divider sx={{ mt: 2 }} />}
                 </Box>
               ))}
               
-              <Button 
-                variant="outlined" 
-                startIcon={<CommentIcon />}
-                fullWidth
-                sx={{ mt: 3, borderRadius: 2 }}
-              >
-                添加更新
-              </Button>
+              {oath.comments.length === 0 && (
+                <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
+                  暂无评论，快来发表第一条评论吧！
+                </Typography>
+              )}
+              
+              {/* 添加评论 */}
+              <Box sx={{ mt: 3, pt: 2, borderTop: '1px solid', borderColor: 'divider' }}>
+                <TextField
+                  fullWidth
+                  multiline
+                  rows={3}
+                  placeholder="写下你的评论..."
+                  value={newComment}
+                  onChange={(e) => setNewComment(e.target.value)}
+                  sx={{ mb: 2 }}
+                />
+                <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <Button
+                    variant="contained"
+                    startIcon={<SendIcon />}
+                    onClick={handleAddComment}
+                    disabled={!newComment.trim() || commentLoading}
+                    sx={{ borderRadius: 2 }}
+                  >
+                    {commentLoading ? '发送中...' : '发送评论'}
+                  </Button>
+                </Box>
+              </Box>
             </Paper>
           </Grid>
           

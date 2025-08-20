@@ -220,31 +220,47 @@ class PublicContractService {
   }
 
   // 获取平台统计信息
-  public async getPlatformStats(): Promise<{ active: number; successRate: number; users: number } | null> {
+  public async getPlatformStats(): Promise<{ active: number; failed: number; notStarted: number; completed: number } | null> {
     if (!this.provider) {
       await this.initialize();
     }
     if (!this.contract) return null;
 
     try {
-      interface ChainOathReadStats {
-        getPlatformStats?: () => Promise<Record<string, unknown> | unknown[] | null>;
+      // 获取所有誓约数据来计算统计信息
+      const allOaths = await this.getAllOaths(1000); // 获取足够多的数据
+      
+      let active = 0;      // 正在进行中的数目 (status = 1)
+      let failed = 0;      // 失败数目 (status = 3)
+      let notStarted = 0;  // 未开始数目 (status = 0)
+      let completed = 0;   // 完成数目 (status = 2)
+      
+      for (const oath of allOaths) {
+        switch (oath.status) {
+          case 0:
+            notStarted++;
+            break;
+          case 1:
+            active++;
+            break;
+          case 2:
+            completed++;
+            break;
+          case 3:
+            failed++;
+            break;
+        }
       }
-      const ro = this.contract as unknown as ChainOathReadStats;
-      const stats = await ro.getPlatformStats?.();
-      if (!stats) {
-        return { active: 0, successRate: 0, users: 0 };
-      }
-      const obj = (stats && typeof stats === 'object' && !Array.isArray(stats)) ? (stats as Record<string, unknown>) : null;
-      const arr = Array.isArray(stats) ? (stats as unknown[]) : null;
+      
       return {
-        active: this.toNumber(obj?.active ?? (arr ? arr[0] : 0)),
-        successRate: this.toNumber(obj?.successRate ?? (arr ? arr[1] : 0)),
-        users: this.toNumber(obj?.users ?? (arr ? arr[2] : 0)),
+        active,
+        failed,
+        notStarted,
+        completed
       };
     } catch (err) {
       console.error('获取平台统计失败:', err);
-      return { active: 0, successRate: 0, users: 0 };
+      return { active: 0, failed: 0, notStarted: 0, completed: 0 };
     }
   }
 
@@ -291,6 +307,67 @@ class PublicContractService {
     } catch (err) {
       console.error('获取誓约详情失败:', err);
       return null;
+    }
+  }
+
+  // 获取点赞排行榜
+  public async getLikeRanking(limit: number = 10): Promise<
+    Array<{
+      id: string;
+      title: string;
+      description: string;
+      creator: string;
+      status: number;
+      startTime: number;
+      endTime: number;
+      committerStakeAmount: string;
+      supervisorStakeAmount: string;
+      likesCount: number;
+    }>
+  > {
+    if (!this.provider) {
+      await this.initialize();
+    }
+    if (!this.contract) {
+      return [];
+    }
+
+    try {
+      // 获取所有誓约
+      const allOaths = await this.getAllOaths(100); // 获取更多誓约用于排序
+      
+      // 为每个誓约获取点赞数
+      const oathsWithLikes = await Promise.all(
+        allOaths.map(async (oath) => {
+          try {
+            interface ChainOathReadLikes {
+              getOathLikes?: (id: string) => Promise<unknown>;
+            }
+            const ro = this.contract as unknown as ChainOathReadLikes;
+            const likesRes = await ro.getOathLikes?.(oath.id);
+            const likesCount = this.toNumber(likesRes);
+            
+            return {
+              ...oath,
+              likesCount
+            };
+          } catch (error) {
+            console.warn(`获取誓约 ${oath.id} 点赞数失败:`, error);
+            return {
+              ...oath,
+              likesCount: 0
+            };
+          }
+        })
+      );
+      
+      // 按点赞数排序并返回前N个
+      return oathsWithLikes
+        .sort((a, b) => b.likesCount - a.likesCount)
+        .slice(0, limit);
+    } catch (err) {
+      console.error('获取点赞排行榜失败:', err);
+      return [];
     }
   }
 }

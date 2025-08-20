@@ -9,6 +9,7 @@ import MyOaths from './pages/MyOaths';
 import OathDetail from './pages/OathDetail';
 import StakeParticipation from './pages/StakeParticipation';
 import AdminPanel from "./pages/AdminPanel";
+import Achievements from './pages/Achievements';
 
 function App() {
   return (
@@ -23,6 +24,7 @@ function App() {
           <Route path="/oath/:id" element={<OathDetail />} />
           <Route path="/stake/:oathId" element={<StakeParticipation />} />
           <Route path="/admin" element={<AdminPanel />} />
+          <Route path="/achievements" element={<Achievements />} />
         </Routes>
       </Router>
     </ThemeProvider>

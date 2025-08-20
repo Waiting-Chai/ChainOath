@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Link as RouterLink, useNavigate } from "react-router-dom";
 import BigNumber from "bignumber.js";
 import { contractService } from "../services/contractService";
-import { enhancedXmtpService } from '../services/enhancedXmtpService';
+
 import { getCurrentNetworkConfig, getCurrentTestTokens } from "../contracts/config";
 import {
   AppBar,
@@ -43,15 +43,9 @@ interface OathFormData {
   committerStake: number | string;
   supervisorStake: number | string;
   supervisorRewardRatio: number;
-  checkInterval: number;
-  checkIntervalUnit: string;
-  checkWindow: number;
-  checkWindowUnit: string;
-  checkThresholdPercent: number;
+  checkpoints: string[];
   maxSupervisorMisses: number;
   maxCommitterFailures: number;
-  startTime: string;
-  endTime: string;
   tokenAddress: string;
 }
 
@@ -79,17 +73,6 @@ const CreateOath: React.FC = () => {
   };
 
   // 创建Oath表单数据
-  // 获取当前时间和30天后的时间
-  const getCurrentDateTime = () => {
-    const now = new Date();
-    return now.toISOString().slice(0, 16);
-  };
-
-  const getDateTimeAfter30Days = () => {
-    const now = new Date();
-    now.setDate(now.getDate() + 30);
-    return now.toISOString().slice(0, 16);
-  };
 
   const [formData, setFormData] = React.useState<OathFormData>(() => ({
     title: "",
@@ -100,15 +83,9 @@ const CreateOath: React.FC = () => {
     committerStake: 0,
     supervisorStake: 0,
     supervisorRewardRatio: 10,
-    checkInterval: 1,
-    checkIntervalUnit: "days",
-    checkWindow: 1,
-    checkWindowUnit: "hours",
-    checkThresholdPercent: 60,
+    checkpoints: [""],
     maxSupervisorMisses: 3,
     maxCommitterFailures: 3,
-    startTime: getCurrentDateTime(),
-    endTime: getDateTimeAfter30Days(),
     tokenAddress: "",
   }));
 
@@ -174,6 +151,42 @@ const CreateOath: React.FC = () => {
     [formData.supervisors, handleInputChange]
   );
 
+  // 处理检查点变化
+  const handleCheckpointChange = React.useCallback(
+    (index: number, value: string) => {
+      const newCheckpoints = [...formData.checkpoints];
+      newCheckpoints[index] = value;
+      handleInputChange("checkpoints", newCheckpoints);
+    },
+    [formData.checkpoints, handleInputChange]
+  );
+
+  // 添加新检查点
+  const addCheckpoint = React.useCallback(() => {
+    if (formData.checkpoints.length < 50) {
+      // 限制最多50个检查点
+      handleInputChange("checkpoints", [...formData.checkpoints, ""]);
+    } else {
+      alert("最多只能添加50个检查点");
+    }
+  }, [formData.checkpoints, handleInputChange]);
+
+  // 删除检查点
+  const removeCheckpoint = React.useCallback(
+    (index: number) => {
+      if (formData.checkpoints.length > 1) {
+        // 至少保留一个检查点
+        const newCheckpoints = formData.checkpoints.filter(
+          (_, i) => i !== index
+        );
+        handleInputChange("checkpoints", newCheckpoints);
+      } else {
+        alert("至少需要一个检查点");
+      }
+    },
+    [formData.checkpoints, handleInputChange]
+  );
+
   // 提交表单
   const handleSubmit = async () => {
     // 验证表单数据
@@ -224,22 +237,18 @@ const CreateOath: React.FC = () => {
       return;
     }
 
-    if (!formData.startTime || !formData.endTime) {
-      alert("请设置开始时间和结束时间");
+    // 验证检查点
+    const validCheckpoints = formData.checkpoints.filter(checkpoint => checkpoint.trim() !== "");
+    if (validCheckpoints.length === 0) {
+      alert("至少需要设置一个检查点");
       return;
     }
 
-    const startTimestamp = new Date(formData.startTime).getTime() / 1000;
-    const endTimestamp = new Date(formData.endTime).getTime() / 1000;
-
-    if (startTimestamp <= Date.now() / 1000) {
-      alert("开始时间必须在未来");
-      return;
-    }
-
-    if (endTimestamp <= startTimestamp) {
-      alert("结束时间必须晚于开始时间");
-      return;
+    for (const checkpoint of validCheckpoints) {
+      if (checkpoint.length < 5) {
+        alert("每个检查点描述至少需要5个字符");
+        return;
+      }
     }
 
     try {
@@ -274,7 +283,12 @@ const CreateOath: React.FC = () => {
         ? formData.totalReward.trim() 
         : formData.totalReward.toString();
 
-      // 4. 构造合约调用数据（不需要shiftedBy转换，createOath方法接收原始字符串）
+      // 4. 构造合约调用数据
+      const currentTime = Math.floor(Date.now() / 1000);
+      const startTime = currentTime + 300; // 5分钟后开始
+      const duration = validCheckpoints.length; // 持续天数等于检查点数量
+      const endTime = startTime + (duration * 86400); // 结束时间 = 开始时间 + 持续天数 * 86400秒
+      
       const oathData = {
         title: formData.title,
         description: formData.description,
@@ -285,10 +299,10 @@ const CreateOath: React.FC = () => {
         supervisorStakeAmount: typeof formData.supervisorStake === 'string' 
           ? formData.supervisorStake 
           : formData.supervisorStake.toString(),
-        duration: Math.floor((endTimestamp - startTimestamp) / 86400), // 转换为天数
+        duration: duration, // 持续天数
         penaltyRate: formData.supervisorRewardRatio, // 使用监督者奖励比例作为惩罚率
-        startTime: Math.floor(startTimestamp), // 开始时间戳
-        endTime: Math.floor(endTimestamp), // 结束时间戳
+        startTime: startTime, // 开始时间戳
+        endTime: endTime // 结束时间戳
       };
 
       console.log("提交的誓约数据:", oathData);
@@ -418,65 +432,7 @@ const CreateOath: React.FC = () => {
         console.log("创建者质押成功");
       }
 
-      // 10. 发送通知给所有参与者
-      const allParticipants = [
-        formData.committer,
-        ...formData.supervisors,
-      ].filter((addr) => addr !== userAddress);
 
-      // 10. 初始化XMTP服务并发送通知
-      try {
-        console.log('初始化XMTP服务...');
-        const xmtpResult = await enhancedXmtpService.initializeXMTP();
-        
-        if (xmtpResult.success) {
-          console.log(xmtpResult.message);
-          
-          // 发送誓约创建通知给所有参与者
-          if (allParticipants.length > 0) {
-            console.log('发送誓约创建通知...');
-            const notificationResult = await enhancedXmtpService.sendOathCreatedNotification(
-              oathId,
-              formData.title,
-              allParticipants
-            );
-            
-            console.log(`通知发送结果: 成功 ${notificationResult.success.length} 个，失败 ${notificationResult.failed.length} 个`);
-            
-            if (notificationResult.failed.length > 0) {
-              console.warn('部分通知发送失败:', notificationResult.failed);
-            }
-          }
-          
-          // 发送质押提醒给守约者（如果不是创建者）
-          if (formData.committer.toLowerCase() !== userAddress.toLowerCase()) {
-            console.log('发送质押提醒给守约者...');
-            await enhancedXmtpService.sendStakeReminderNotification(
-              oathId,
-              formData.title,
-              [formData.committer],
-              'committer'
-            );
-          }
-          
-          // 发送质押提醒给监督者
-          if (formData.supervisors.length > 0) {
-            console.log('发送质押提醒给监督者...');
-            await enhancedXmtpService.sendStakeReminderNotification(
-              oathId,
-              formData.title,
-              formData.supervisors,
-              'supervisor'
-            );
-          }
-        } else {
-          console.warn('XMTP初始化失败:', xmtpResult.message);
-          alert(`XMTP通知服务初始化失败: ${xmtpResult.message}\n誓约创建成功，但无法发送通知`);
-        }
-      } catch (xmtpError) {
-        console.error('XMTP通知发送失败:', xmtpError);
-        // 不阻止誓约创建流程，只是警告用户
-      }
 
       // 11. 设置合约事件监听
       contractService.setupEventListeners({
@@ -493,18 +449,10 @@ const CreateOath: React.FC = () => {
         },
         onOathAccepted: (oathId: string) => {
           console.log("监听到誓约接受事件:", oathId);
-          // 发送誓约激活通知
-          enhancedXmtpService.sendOathCreatedNotification(
-            oathId,
-            formData.title,
-            allParticipants
-          ).catch(error => {
-            console.error('发送誓约激活通知失败:', error);
-          });
         },
       });
 
-      alert(`誓约创建成功！\n誓约ID: ${oathId}\n已发送通知给所有参与者`);
+      alert(`誓约创建成功！\n誓约ID: ${oathId}`);
 
       // 跳转到誓约详情页或首页
       navigator("/");
@@ -649,35 +597,7 @@ const CreateOath: React.FC = () => {
                 />
               </HelpTooltip>
 
-              <HelpTooltip title="誓约正式开始的时间，从这个时间开始计算履约期限和监督周期">
-                <TextField
-                  fullWidth
-                  label="开始时间"
-                  type="datetime-local"
-                  variant="outlined"
-                  margin="normal"
-                  InputLabelProps={{ shrink: true }}
-                  required
-                  value={formData.startTime}
-                  onChange={(e) =>
-                    handleInputChange("startTime", e.target.value)
-                  }
-                />
-              </HelpTooltip>
 
-              <HelpTooltip title="誓约结束的时间，到达这个时间后将进行最终的履约评估和奖励分配">
-                <TextField
-                  fullWidth
-                  label="结束时间"
-                  type="datetime-local"
-                  variant="outlined"
-                  margin="normal"
-                  InputLabelProps={{ shrink: true }}
-                  required
-                  value={formData.endTime}
-                  onChange={(e) => handleInputChange("endTime", e.target.value)}
-                />
-              </HelpTooltip>
 
               <HelpTooltip title="选择用于奖励分配和质押的ERC20代币类型">
                 <FormControl fullWidth margin="normal" required>
@@ -922,120 +842,59 @@ const CreateOath: React.FC = () => {
                 />
               </HelpTooltip>
 
-              <HelpTooltip title="监督者进行检查的时间间隔，决定了监督的频率">
-                <Box sx={{ display: "flex", gap: 2, alignItems: "center" }}>
-                  <TextField
-                    label="检查间隔"
-                    placeholder="间隔值"
-                    variant="outlined"
-                    margin="normal"
-                    type="text"
-                    sx={{ flex: 2 }}
-                    value={
-                      formData.checkInterval === 0
-                        ? ""
-                        : formData.checkInterval.toString()
-                    }
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      if (value === "" || /^\d*\.?\d*$/.test(value)) {
-                        handleInputChange(
-                          "checkInterval",
-                          value === "" ? 0 : parseFloat(value)
-                        );
-                      }
-                    }}
-                  />
-                  <FormControl sx={{ flex: 1, mt: 1 }}>
-                    <InputLabel>单位</InputLabel>
-                    <Select
-                      value={formData.checkIntervalUnit}
-                      label="单位"
-                      onChange={(e) =>
-                        handleInputChange("checkIntervalUnit", e.target.value)
-                      }
-                    >
-                      <MenuItem value="seconds">秒</MenuItem>
-                      <MenuItem value="minutes">分钟</MenuItem>
-                      <MenuItem value="hours">小时</MenuItem>
-                      <MenuItem value="days">天</MenuItem>
-                      <MenuItem value="weeks">周</MenuItem>
-                    </Select>
-                  </FormControl>
+              <Box sx={{ mb: 3 }}>
+                <Box sx={{ display: "flex", alignItems: "center", mb: 2 }}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: "medium" }}>
+                    检查点设置
+                  </Typography>
+                  <Button
+                    startIcon={<AddCircleOutlineIcon />}
+                    sx={{ ml: 2 }}
+                    size="small"
+                    onClick={addCheckpoint}
+                    disabled={formData.checkpoints.length >= 50}
+                  >
+                    添加检查点
+                  </Button>
                 </Box>
-              </HelpTooltip>
 
-              <HelpTooltip title="监督者提交检查结果的时间窗口，超过此时间将视为失职">
-                <Box sx={{ display: "flex", gap: 2, alignItems: "center" }}>
-                  <TextField
-                    label="检查窗口"
-                    placeholder="窗口值"
+                {formData.checkpoints.map((checkpoint, index) => (
+                  <Paper
+                    key={index}
                     variant="outlined"
-                    margin="normal"
-                    type="text"
-                    sx={{ flex: 2 }}
-                    value={
-                      formData.checkWindow === 0
-                        ? ""
-                        : formData.checkWindow.toString()
-                    }
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      if (value === "" || /^\d*\.?\d*$/.test(value)) {
-                        handleInputChange(
-                          "checkWindow",
-                          value === "" ? 0 : parseFloat(value)
-                        );
-                      }
-                    }}
-                  />
-                  <FormControl sx={{ flex: 1, mt: 1 }}>
-                    <InputLabel>单位</InputLabel>
-                    <Select
-                      value={formData.checkWindowUnit}
-                      label="单位"
-                      onChange={(e) =>
-                        handleInputChange("checkWindowUnit", e.target.value)
-                      }
+                    sx={{ p: 2, mb: 2, position: "relative" }}
+                  >
+                    <HelpTooltip title="描述这个检查点的具体要求和目标">
+                      <TextField
+                        fullWidth
+                        label={`检查点 ${index + 1}`}
+                        placeholder="描述检查点的具体要求（至少5个字符）"
+                        variant="outlined"
+                        margin="normal"
+                        value={checkpoint}
+                        onChange={(e) =>
+                          handleCheckpointChange(index, e.target.value)
+                        }
+                        required
+                      />
+                    </HelpTooltip>
+                    <IconButton
+                      size="small"
+                      sx={{
+                        position: "absolute",
+                        top: 8,
+                        right: 8,
+                        color: "error.main",
+                      }}
+                      onClick={() => removeCheckpoint(index)}
+                      disabled={formData.checkpoints.length <= 1}
                     >
-                      <MenuItem value="seconds">秒</MenuItem>
-                      <MenuItem value="minutes">分钟</MenuItem>
-                      <MenuItem value="hours">小时</MenuItem>
-                      <MenuItem value="days">天</MenuItem>
-                      <MenuItem value="weeks">周</MenuItem>
-                    </Select>
-                  </FormControl>
-                </Box>
-              </HelpTooltip>
+                      <RemoveCircleOutlineIcon />
+                    </IconButton>
+                  </Paper>
+                ))}
+              </Box>
 
-              <HelpTooltip title="判定守约成功所需的监督者同意比例，达到此比例即视为履约成功">
-                <TextField
-                  fullWidth
-                  label="成功阈值 (%)"
-                  placeholder="判定守约成功的监督者签名比例"
-                  variant="outlined"
-                  margin="normal"
-                  type="text"
-                  inputProps={{ min: 0, max: 100 }}
-                  value={
-                    formData.checkThresholdPercent === 0
-                      ? ""
-                      : formData.checkThresholdPercent.toString()
-                  }
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    if (
-                      value === "" ||
-                      (/^\d*\.?\d*$/.test(value) && parseFloat(value) <= 100)
-                    ) {
-                      handleInputChange(
-                        "checkThresholdPercent",
-                        value === "" ? 0 : parseFloat(value)
-                      );
-                    }
-                  }}
-                />
-              </HelpTooltip>
 
               <HelpTooltip title="监督者允许的最大失职次数，超过此次数将被取消监督资格">
                 <TextField
@@ -1132,21 +991,7 @@ const CreateOath: React.FC = () => {
                     </Typography>
                   </Box>
 
-                  <Box>
-                    <Typography variant="body2" color="text.secondary">
-                      开始时间
-                    </Typography>
-                    <Typography variant="body1">
-                      {formData.startTime}
-                    </Typography>
-                  </Box>
 
-                  <Box>
-                    <Typography variant="body2" color="text.secondary">
-                      结束时间
-                    </Typography>
-                    <Typography variant="body1">{formData.endTime}</Typography>
-                  </Box>
 
                   <Box>
                     <Typography variant="body2" color="text.secondary">
