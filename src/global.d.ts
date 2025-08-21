@@ -2,6 +2,13 @@ export {};
 
 declare global {
   interface Window {
-    ethereum?: any;
-  }
+  ethereum?: {
+    request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
+    on: (event: string, handler: (...args: unknown[]) => void) => void;
+    removeListener: (event: string, handler: (...args: unknown[]) => void) => void;
+    isMetaMask?: boolean;
+    chainId?: string;
+    selectedAddress?: string;
+  };
+}
 }

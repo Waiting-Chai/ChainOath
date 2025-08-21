@@ -20,7 +20,8 @@ import {
   EmojiEvents as TrophyIcon,
   Visibility as ViewIcon,
 } from '@mui/icons-material';
-import { publicContractService } from '../services/publicContractService';
+// TODO: 实现公共合约服务
+// import { publicContractService } from '../services/publicContractService';
 
 interface RankingOath {
   id: string;
@@ -50,7 +51,9 @@ const LikeRanking: React.FC<LikeRankingProps> = ({ limit = 10 }) => {
     const loadRanking = async () => {
       try {
         setLoading(true);
-        const data = await publicContractService.getLikeRanking(limit);
+        // TODO: 实现publicContractService.getLikeRanking方法
+        // const data = await publicContractService.getLikeRanking(limit);
+        const data: RankingOath[] = []; // 临时空数据
         if (mounted) {
           setRankingOaths(data);
         }
