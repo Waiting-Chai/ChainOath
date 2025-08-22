@@ -23,17 +23,11 @@ import {
 // TODO: 实现公共合约服务
 // import { publicContractService } from '../services/publicContractService';
 
-interface RankingOath {
-  id: string;
+interface SimpleOath {
+  id: number;
   title: string;
-  description: string;
-  creator: string;
-  status: number;
-  startTime: number;
-  endTime: number;
-  committerStakeAmount: string;
-  supervisorStakeAmount: string;
-  likesCount: number;
+  creater: string;
+  likeCount: number;
 }
 
 interface LikeRankingProps {
@@ -42,7 +36,7 @@ interface LikeRankingProps {
 
 const LikeRanking: React.FC<LikeRankingProps> = ({ limit = 10 }) => {
   const navigate = useNavigate();
-  const [rankingOaths, setRankingOaths] = React.useState<RankingOath[]>([]);
+  const [rankingOaths, setRankingOaths] = React.useState<SimpleOath[]>([]);
   const [loading, setLoading] = React.useState(false);
 
   React.useEffect(() => {
@@ -53,7 +47,7 @@ const LikeRanking: React.FC<LikeRankingProps> = ({ limit = 10 }) => {
         setLoading(true);
         // TODO: 实现publicContractService.getLikeRanking方法
         // const data = await publicContractService.getLikeRanking(limit);
-        const data: RankingOath[] = []; // 临时空数据
+        const data: SimpleOath[] = []; // 临时空数据
         if (mounted) {
           setRankingOaths(data);
         }
@@ -153,7 +147,7 @@ const LikeRanking: React.FC<LikeRankingProps> = ({ limit = 10 }) => {
                     cursor: 'pointer',
                   },
                 }}
-                onClick={() => handleViewOath(oath.id)}
+                onClick={() => handleViewOath(oath.id.toString())}
               >
                 <ListItemAvatar sx={{ minWidth: 40 }}>
                   {getRankIcon(index)}
@@ -176,14 +170,9 @@ const LikeRanking: React.FC<LikeRankingProps> = ({ limit = 10 }) => {
                   secondary={
                     <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.5 }}>
                       <Typography variant="caption" color="text.secondary">
-                        创建者: {oath.creator.slice(0, 6)}...{oath.creator.slice(-4)}
+                        创建者: {oath.creater.slice(0, 6)}...{oath.creater.slice(-4)}
                       </Typography>
-                      <Chip
-                        label={getStatusText(oath.status)}
-                        size="small"
-                        color={getStatusColor(oath.status)}
-                        sx={{ height: 16, fontSize: '0.6rem' }}
-                      />
+
                     </Stack>
                   }
                 />
@@ -192,14 +181,14 @@ const LikeRanking: React.FC<LikeRankingProps> = ({ limit = 10 }) => {
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                     <FavoriteIcon sx={{ fontSize: 16, color: 'error.main' }} />
                     <Typography variant="body2" fontWeight="bold">
-                      {oath.likesCount}
+                      {oath.likeCount}
                     </Typography>
                   </Box>
                   <IconButton
                     size="small"
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleViewOath(oath.id);
+                      handleViewOath(oath.id.toString());
                     }}
                   >
                     <ViewIcon fontSize="small" />

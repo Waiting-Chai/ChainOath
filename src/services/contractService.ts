@@ -601,19 +601,11 @@ export class ContractService {
   }
 
   /**
-   * 提取资金
+   * 注意：资金提取功能已集成到evaluateCompletion函数中
+   * 当评估完成时，资金会自动分配给相应的接收方
+   * - 如果任务完成：资金转给承诺人
+   * - 如果任务失败：资金退还给创建者
    */
-  async withdrawFunds(oathId: number): Promise<void> {
-    this.ensureInitialized();
-    
-    try {
-      const tx = await this.oathContract!.withdrawFunds(oathId);
-      await tx.wait();
-    } catch (error) {
-      console.error('Failed to withdraw funds:', error);
-      throw error;
-    }
-  }
 
   // ==================== Query Methods ====================
 
@@ -626,6 +618,8 @@ export class ContractService {
     try {
       const result = await this.oathContract!.getOath(oathId);
       
+      const completionStatus = Number(result.completionStatus) as CompletionStatus;
+      
       return {
         id: Number(result.id),
         title: result.title,
@@ -636,8 +630,8 @@ export class ContractService {
         amount: formatEther(result.amount),
         deadline: Number(result.deadline),
         checkpoints: result.checkpoints,
-        completionStatus: result.completionStatus,
-        status: result.completionStatus, // 添加status属性
+        completionStatus: completionStatus,
+        status: completionStatus, // 添加status属性
         upvotes: Number(result.upvotes),
         likeCount: Number(result.upvotes), // 添加likeCount属性
         isActive: result.isActive,

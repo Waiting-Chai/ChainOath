@@ -105,7 +105,7 @@ export interface OathCreatedEvent extends ContractEvent {
   event: 'OathCreated';
   args: {
     oathId: number;
-    creator: string;
+    creater: string;
     committer: string;
     amount: string;
     deadline: number;

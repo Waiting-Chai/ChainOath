@@ -35,7 +35,6 @@ import {
   Send as SendIcon,
   CheckCircle as CheckCircleIcon,
   Cancel as CancelIcon,
-  AccountBalanceWallet as WalletIcon,
   Close as CloseIcon,
 } from '@mui/icons-material';
 import { contractService } from '../services/contractService';
@@ -54,9 +53,7 @@ const OathDetail: React.FC = () => {
   const [isCommenting, setIsCommenting] = useState(false);
   const [isLiking, setIsLiking] = useState(false);
   const [openEvaluateDialog, setOpenEvaluateDialog] = useState(false);
-  const [openWithdrawDialog, setOpenWithdrawDialog] = useState(false);
   const [isEvaluating, setIsEvaluating] = useState(false);
-  const [isWithdrawing, setIsWithdrawing] = useState(false);
   // const [evaluationSuccess, setEvaluationSuccess] = useState<boolean | null>(null);
   const [error, setError] = useState<string>('');
 
@@ -74,10 +71,12 @@ const OathDetail: React.FC = () => {
       // 初始化合约服务
       await contractService.initialize();
       const userAddress = await contractService.getCurrentUserAddress();
+
       setCurrentUserAddress(userAddress);
       
       // 获取誓约详情
       const oathData = await contractService.getOath(parseInt(id));
+
       setOath(oathData);
       
       // 获取评论
@@ -151,23 +150,7 @@ const OathDetail: React.FC = () => {
     }
   };
 
-  const handleWithdraw = async () => {
-    if (!oath || isWithdrawing) return;
-    
-    try {
-      setIsWithdrawing(true);
-      await contractService.withdrawFunds(oath.id);
-      setOpenWithdrawDialog(false);
-      
-      // 重新加载誓约详情
-      await loadOathDetail();
-    } catch (error) {
-      console.error('Failed to withdraw funds:', error);
-      setError('提取资金失败');
-    } finally {
-      setIsWithdrawing(false);
-    }
-  };
+  // 注意：资金提取功能已移除，因为资金在评估完成时自动分配
 
   const formatAddress = (address: string) => {
     return `${address.slice(0, 6)}...${address.slice(-4)}`;
@@ -207,10 +190,13 @@ const OathDetail: React.FC = () => {
     }
   };
 
+
+  
   const isCreator = currentUserAddress && oath && currentUserAddress.toLowerCase() === oath.creater.toLowerCase();
   const isCommitter = currentUserAddress && oath && currentUserAddress.toLowerCase() === oath.committer.toLowerCase();
-  const canEvaluate = isCreator && oath?.status === CompletionStatus.PENDING;
-  const canWithdraw = (isCreator || isCommitter) && oath?.status !== CompletionStatus.PENDING;
+  const canEvaluate = isCreator && oath?.completionStatus === CompletionStatus.PENDING;
+  
+
 
   if (loading) {
     return (
@@ -255,8 +241,8 @@ const OathDetail: React.FC = () => {
                 {oath.title}
               </Typography>
               <Chip 
-                label={getStatusText(oath.status)} 
-                color={getStatusColor(oath.status) as any}
+                label={getStatusText(oath.completionStatus)}
+                color={getStatusColor(oath.completionStatus) as any}
                 size="medium"
               />
             </Box>
@@ -296,7 +282,7 @@ const OathDetail: React.FC = () => {
               </Grid>
               <Grid size={{ xs: 12, sm: 6 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                  <WalletIcon sx={{ mr: 1, color: 'text.secondary' }} />
+                  <PersonIcon sx={{ mr: 1, color: 'text.secondary' }} />
                   <Box>
                     <Typography variant="body2" color="text.secondary">
                       抵押金额
@@ -344,6 +330,7 @@ const OathDetail: React.FC = () => {
             )}
 
             {/* 操作按钮 */}
+
             {currentUserAddress && (
               <Box sx={{ display: 'flex', gap: 2, mb: 4 }}>
                 {canEvaluate && (
@@ -354,17 +341,6 @@ const OathDetail: React.FC = () => {
                     onClick={() => setOpenEvaluateDialog(true)}
                   >
                     评估任务
-                  </Button>
-                )}
-                
-                {canWithdraw && (
-                  <Button
-                    variant="contained"
-                    color="success"
-                    startIcon={<WalletIcon />}
-                    onClick={() => setOpenWithdrawDialog(true)}
-                  >
-                    提取资金
                   </Button>
                 )}
               </Box>
@@ -497,38 +473,7 @@ const OathDetail: React.FC = () => {
         </DialogActions>
       </Dialog>
 
-      {/* 提取资金对话框 */}
-      <Dialog open={openWithdrawDialog} onClose={() => setOpenWithdrawDialog(false)}>
-        <DialogTitle>
-          提取资金
-          <IconButton
-            aria-label="close"
-            onClick={() => setOpenWithdrawDialog(false)}
-            sx={{ position: 'absolute', right: 8, top: 8 }}
-          >
-            <CloseIcon />
-          </IconButton>
-        </DialogTitle>
-        <DialogContent>
-          <Typography gutterBottom>
-            确认要提取资金吗？
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            {isCreator ? '作为创建者，您可以提取相应的资金。' : '作为承诺人，您可以提取相应的资金。'}
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpenWithdrawDialog(false)}>取消</Button>
-          <Button
-            onClick={handleWithdraw}
-            variant="contained"
-            color="success"
-            disabled={isWithdrawing}
-          >
-            {isWithdrawing ? <CircularProgress size={20} /> : '确认提取'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+
     </Container>
   );
 };
