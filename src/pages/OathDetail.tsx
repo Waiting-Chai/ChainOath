@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -40,6 +40,8 @@ import {
 import { contractService } from '../services/contractService';
 import type { Oath, Comment } from '../services/contractService';
 import { CompletionStatus } from '../services/contractService';
+import ProgressDialog from '../components/ProgressDialog';
+import type { ProgressStep } from '../components/ProgressDialog';
 
 const OathDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -54,14 +56,14 @@ const OathDetail: React.FC = () => {
   const [isLiking, setIsLiking] = useState(false);
   const [openEvaluateDialog, setOpenEvaluateDialog] = useState(false);
   const [isEvaluating, setIsEvaluating] = useState(false);
-  // const [evaluationSuccess, setEvaluationSuccess] = useState<boolean | null>(null);
   const [error, setError] = useState<string>('');
+  
+  // 进度对话框状态
+  const [progressOpen, setProgressOpen] = useState(false);
+  const [progressSteps, setProgressSteps] = useState<ProgressStep[]>([]);
+  const [currentStepIndex, setCurrentStepIndex] = useState(0);
 
-  useEffect(() => {
-    loadOathDetail();
-  }, [id]);
-
-  const loadOathDetail = async () => {
+  const loadOathDetail = useCallback(async () => {
     if (!id) return;
     
     try {
@@ -94,19 +96,89 @@ const OathDetail: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [id]);
+
+  useEffect(() => {
+    loadOathDetail();
+  }, [loadOathDetail]);
 
   const handleLike = async () => {
     if (!oath || !currentUserAddress || isLiking) return;
     
+    // 初始化进度步骤
+    const steps: ProgressStep[] = [
+      { id: '1', label: '验证用户权限', description: '检查钱包连接状态', status: 'pending' },
+      { id: '2', label: '提交点赞交易', description: '向区块链提交点赞请求', status: 'pending' },
+      { id: '3', label: '等待交易确认', description: '等待区块链确认交易', status: 'pending' },
+      { id: '4', label: '更新界面', description: '更新点赞状态和数量', status: 'pending' },
+      { id: '5', label: '完成点赞', description: '点赞操作已完成', status: 'pending' }
+    ];
+
+    setProgressSteps(steps);
+    setCurrentStepIndex(0);
+    setProgressOpen(true);
+    
     try {
       setIsLiking(true);
+      
+      // 步骤1: 验证用户权限
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 0 ? { ...step, status: 'running' as const } : step
+      ));
+      await new Promise(resolve => setTimeout(resolve, 500));
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 0 ? { ...step, status: 'completed' } : step
+      ));
+      setCurrentStepIndex(1);
+
+      // 步骤2: 提交点赞交易
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 1 ? { ...step, status: 'running' as const } : step
+      ));
       await contractService.likeOath(oath.id);
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 1 ? { ...step, status: 'completed' } : step
+      ));
+      setCurrentStepIndex(2);
+
+      // 步骤3: 等待交易确认
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 2 ? { ...step, status: 'running' as const } : step
+      ));
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 2 ? { ...step, status: 'completed' } : step
+      ));
+      setCurrentStepIndex(3);
+      
+      // 步骤4: 更新界面
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 3 ? { ...step, status: 'running' as const } : step
+      ));
       setIsLiked(true);
       setOath({ ...oath, likeCount: oath.likeCount + 1 });
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 3 ? { ...step, status: 'completed' } : step
+      ));
+      setCurrentStepIndex(4);
+
+      // 步骤5: 完成点赞
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 4 ? { ...step, status: 'completed' } : step
+      ));
+      
+      // 2秒后自动关闭进度对话框
+      setTimeout(() => {
+        setProgressOpen(false);
+      }, 2000);
     } catch (error) {
       console.error('Failed to like oath:', error);
       setError('点赞失败');
+      
+      // 将当前步骤标记为失败
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === currentStepIndex ? { ...step, status: 'error', description: error instanceof Error ? error.message : '点赞失败' } : step
+      ));
     } finally {
       setIsLiking(false);
     }
@@ -115,17 +187,81 @@ const OathDetail: React.FC = () => {
   const handleAddComment = async () => {
     if (!oath || !currentUserAddress || !newComment.trim() || isCommenting) return;
     
+    // 初始化进度步骤
+    const steps: ProgressStep[] = [
+      { id: '1', label: '验证评论内容', description: '检查评论格式和长度', status: 'pending' },
+      { id: '2', label: '提交评论交易', description: '向区块链提交评论', status: 'pending' },
+      { id: '3', label: '等待交易确认', description: '等待区块链确认交易', status: 'pending' },
+      { id: '4', label: '更新评论列表', description: '刷新评论数据', status: 'pending' },
+      { id: '5', label: '完成评论', description: '评论发表成功', status: 'pending' }
+    ];
+
+    setProgressSteps(steps);
+    setCurrentStepIndex(0);
+    setProgressOpen(true);
+    
     try {
       setIsCommenting(true);
-      await contractService.addComment(oath.id, newComment.trim());
       
-      // 重新加载评论
+      // 步骤1: 验证评论内容
+      setProgressSteps(prev => prev.map((step, index) =>
+        index === 0 ? { ...step, status: 'running' as const } : step
+      ));
+      await new Promise(resolve => setTimeout(resolve, 300));
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 0 ? { ...step, status: 'completed' } : step
+      ));
+      setCurrentStepIndex(1);
+
+      // 步骤2: 提交评论交易
+      setProgressSteps(prev => prev.map((step, index) =>
+        index === 1 ? { ...step, status: 'running' as const } : step
+      ));
+      await contractService.addComment(oath.id, newComment.trim());
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 1 ? { ...step, status: 'completed' } : step
+      ));
+      setCurrentStepIndex(2);
+
+      // 步骤3: 等待交易确认
+      setProgressSteps(prev => prev.map((step, index) =>
+        index === 2 ? { ...step, status: 'running' as const } : step
+      ));
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 2 ? { ...step, status: 'completed' } : step
+      ));
+      setCurrentStepIndex(3);
+      
+      // 步骤4: 更新评论列表
+      setProgressSteps(prev => prev.map((step, index) =>
+        index === 3 ? { ...step, status: 'running' as const } : step
+      ));
       const commentsData = await contractService.getOathComments(oath.id);
       setComments(commentsData);
       setNewComment('');
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 3 ? { ...step, status: 'completed' } : step
+      ));
+      setCurrentStepIndex(4);
+
+      // 步骤5: 完成评论
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 4 ? { ...step, status: 'completed' } : step
+      ));
+      
+      // 2秒后自动关闭进度对话框
+      setTimeout(() => {
+        setProgressOpen(false);
+      }, 2000);
     } catch (error) {
       console.error('Failed to add comment:', error);
       setError('添加评论失败');
+      
+      // 将当前步骤标记为失败
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === currentStepIndex ? { ...step, status: 'error', description: error instanceof Error ? error.message : '添加评论失败' } : step
+      ));
     } finally {
       setIsCommenting(false);
     }
@@ -193,7 +329,6 @@ const OathDetail: React.FC = () => {
 
   
   const isCreator = currentUserAddress && oath && currentUserAddress.toLowerCase() === oath.creater.toLowerCase();
-  const isCommitter = currentUserAddress && oath && currentUserAddress.toLowerCase() === oath.committer.toLowerCase();
   const canEvaluate = isCreator && oath?.completionStatus === CompletionStatus.PENDING;
   
 
@@ -473,6 +608,13 @@ const OathDetail: React.FC = () => {
         </DialogActions>
       </Dialog>
 
+      {/* 进度对话框 */}
+      <ProgressDialog
+        open={progressOpen}
+        steps={progressSteps}
+        currentStepIndex={currentStepIndex}
+        title="操作进度"
+      />
 
     </Container>
   );

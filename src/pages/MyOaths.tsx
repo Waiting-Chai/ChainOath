@@ -76,17 +76,6 @@ const MyOaths: React.FC = () => {
     setWarningMessage("");
   };
 
-  React.useEffect(() => {
-    initializeServices();
-    checkWalletConnection();
-  }, []);
-
-  React.useEffect(() => {
-    if (currentUserAddress) {
-      loadMyOaths();
-    }
-  }, [currentUserAddress]);
-
   // 初始化服务
   const initializeServices = async () => {
     try {
@@ -128,7 +117,7 @@ const MyOaths: React.FC = () => {
   };
 
   // 加载我的誓约
-  const loadMyOaths = async () => {
+  const loadMyOaths = React.useCallback(async () => {
     if (!currentUserAddress) return;
     
     setMyOathsLoading(true);
@@ -140,7 +129,18 @@ const MyOaths: React.FC = () => {
     } finally {
       setMyOathsLoading(false);
     }
-  };
+  }, [currentUserAddress]);
+
+  React.useEffect(() => {
+    initializeServices();
+    checkWalletConnection();
+  }, []);
+
+  React.useEffect(() => {
+    if (currentUserAddress) {
+      loadMyOaths();
+    }
+  }, [currentUserAddress, loadMyOaths]);
 
   // 格式化时间
   const formatDate = (timestamp: number) => {

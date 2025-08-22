@@ -24,7 +24,7 @@ export type {
   Notification
 } from './contract';
 
-export { ContractError } from './contract';
+export { ChainOathError } from './contract';
 
 export {
   AchievementType,

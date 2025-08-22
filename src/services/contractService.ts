@@ -1,6 +1,7 @@
 import { ethers, formatEther, parseEther, BrowserProvider } from 'ethers';
 import { getCurrentNetworkConfig, CURRENT_NETWORK, TOKEN_OPTIONS } from '../contracts/config';
-import {  WETHABI } from '../contracts/ChainOathABI';
+import { WETHABI } from '../contracts/ChainOathABI';
+
 
 // ==================== Interface Definitions ====================
 
@@ -477,7 +478,7 @@ export class ContractService {
             console.log('[ContractService] 从事件日志获取到誓约ID:', oathId);
             break;
           }
-        } catch (parseError) {
+        } catch {
           // 忽略解析错误，继续尝试下一个日志
           continue;
         }

@@ -10,7 +10,6 @@ import {
   ListItemText,
   ListItemAvatar,
   Avatar,
-  Chip,
   IconButton,
   CircularProgress,
   Stack,
@@ -67,25 +66,7 @@ const LikeRanking: React.FC<LikeRankingProps> = ({ limit = 10 }) => {
     };
   }, [limit]);
 
-  const getStatusText = (status: number): string => {
-    switch (status) {
-      case 0: return '准备中';
-      case 1: return '进行中';
-      case 2: return '已完成';
-      case 3: return '已失败';
-      default: return '未知';
-    }
-  };
 
-  const getStatusColor = (status: number): 'default' | 'primary' | 'secondary' | 'error' | 'info' | 'success' | 'warning' => {
-    switch (status) {
-      case 0: return 'info';
-      case 1: return 'primary';
-      case 2: return 'success';
-      case 3: return 'error';
-      default: return 'default';
-    }
-  };
 
   const getRankIcon = (index: number) => {
     if (index === 0) return <TrophyIcon sx={{ color: '#FFD700' }} />; // 金色

@@ -198,7 +198,7 @@ export const ContractErrorType = {
 export type ContractErrorType = typeof ContractErrorType[keyof typeof ContractErrorType];
 
 // 合约错误接口
-export interface ContractError {
+export interface ContractErrorInfo {
   type: ContractErrorType;
   message: string;
   code?: number;
@@ -206,14 +206,14 @@ export interface ContractError {
 }
 
 // 合约错误类
-export class ContractError extends Error {
+export class ChainOathError extends Error {
   public type: ContractErrorType;
   public code?: number;
   public details?: any;
 
   constructor(type: ContractErrorType, message: string, details?: any) {
     super(message);
-    this.name = 'ContractError';
+    this.name = 'ChainOathError';
     this.type = type;
     this.details = details;
   }

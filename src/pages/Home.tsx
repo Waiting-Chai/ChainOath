@@ -23,7 +23,6 @@ import {
   Avatar,
   Divider,
   Paper,
-  // Pagination,
   CircularProgress,
   Fab,
   Select,
@@ -51,27 +50,10 @@ import { walletService } from "../services/walletService";
 import { contractService, CompletionStatus } from "../services/contractService";
 import type { Oath } from "../services/contractService";
 import { TOKEN_OPTIONS } from "../contracts/config";
+import ProgressDialog from '../components/ProgressDialog';
+import type { ProgressStep } from '../components/ProgressDialog';
 
-interface TabPanelProps {
-  children?: React.ReactNode;
-  index: number;
-  value: number;
-}
 
-function TabPanel(props: TabPanelProps) {
-  const { children, value, index, ...other } = props;
-  return (
-    <div
-      role="tabpanel"
-      hidden={value !== index}
-      id={`simple-tabpanel-${index}`}
-      aria-labelledby={`simple-tab-${index}`}
-      {...other}
-    >
-      {value === index && <Box>{children}</Box>}
-    </div>
-  );
-}
 
 const Home: React.FC = () => {
   const navigator = useNavigate();
@@ -81,8 +63,7 @@ const Home: React.FC = () => {
   const [warningMessage, setWarningMessage] = React.useState("");
   const [currentUserAddress, setCurrentUserAddress] = React.useState<string>("");
   const [isContractServiceInitialized, setIsContractServiceInitialized] = React.useState(false);
-  const [isLoadingOaths, setIsLoadingOaths] = React.useState(false);
-  const [isLoadingTopOaths, setIsLoadingTopOaths] = React.useState(false);
+
   const [loadingError, setLoadingError] = React.useState<string | null>(null);
   const pleaseConnectWallet = "请连接数字钱包";
 
@@ -99,6 +80,11 @@ const Home: React.FC = () => {
   });
   const [isCreating, setIsCreating] = React.useState(false);
 
+  // 进度对话框状态
+  const [progressOpen, setProgressOpen] = React.useState(false);
+  const [progressSteps, setProgressSteps] = React.useState<ProgressStep[]>([]);
+  const [currentStepIndex, setCurrentStepIndex] = React.useState(0);
+
   // 移除我的誓约状态管理，已迁移到MyOaths页面
 
   // 展示窗状态
@@ -106,7 +92,9 @@ const Home: React.FC = () => {
   const [currentOathIndex, setCurrentOathIndex] = React.useState(0);
   const [oathsLoading, setOathsLoading] = React.useState(false);
   const [oathsPage, setOathsPage] = React.useState(1);
-  // const [oathsTotal] = React.useState(0);
+  
+  // 评论数量状态
+  const [oathCommentCounts, setOathCommentCounts] = React.useState<{[key: string]: number}>({});
 
   // 点赞排行榜状态
   const [topOaths, setTopOaths] = React.useState<Oath[]>([]);
@@ -123,69 +111,8 @@ const Home: React.FC = () => {
     setWarningMessage("");
   };
 
-  React.useEffect(() => {
-    console.log("[Home] 组件初始化开始");
-    checkWalletConnection();
-    // 只加载不需要钱包连接的公共数据
-    loadPublicData();
-  }, []);
-
-  // 检查钱包连接状态
-  const checkWalletConnection = async () => {
-    console.log("[Home] 检查钱包连接状态");
-    try {
-      if (walletService.isConnected()) {
-        console.log("[Home] 钱包已连接，获取地址");
-        const address = await walletService.getCurrentAddress();
-        if (address) {
-          console.log("[Home] 获取到钱包地址:", address);
-          setCurrentUserAddress(address);
-          sessionStorage.setItem("currentUserAddr", address);
-          // 钱包连接成功后初始化合约服务
-        await initializeServices();
-        // 初始化完成后加载私有数据
-        console.log("[Home] 合约服务初始化完成，开始加载私有数据");
-        await loadPrivateData();
-        }
-      } else {
-        console.log("[Home] 钱包未连接");
-      }
-    } catch (error) {
-      console.error("[Home] 检查钱包连接失败:", error);
-    }
-  };
-
-  // 移除我的誓约相关的useEffect，已迁移到MyOaths页面
-
-  // 初始化服务
-  const initializeServices = async () => {
-    console.log("[Home] 开始初始化合约服务");
-    try {
-      if (!walletService.isConnected()) {
-        console.log("[Home] 钱包未连接，跳过合约服务初始化");
-        return;
-      }
-      
-      console.log("[Home] 调用contractService.initialize()");
-      await contractService.initialize();
-      setIsContractServiceInitialized(true);
-      console.log("[Home] 合约服务初始化成功");
-    } catch (error) {
-      console.error("[Home] 合约服务初始化失败:", error);
-      setIsContractServiceInitialized(false);
-    }
-  };
-
-  // 加载公共数据（不需要钱包连接）
-  const loadPublicData = async () => {
-    console.log("[Home] 开始加载公共数据");
-    // 目前所有数据都需要合约服务，所以这里暂时不加载任何数据
-    // 等钱包连接后再加载
-    console.log("[Home] 公共数据加载完成（暂无公共数据）");
-  };
-
   // 加载需要钱包连接的私有数据
-  const loadPrivateData = async () => {
+  const loadPrivateData = React.useCallback(async () => {
     console.log("[Home] 开始加载私有数据");
     console.log("[Home] 当前合约服务初始化状态:", isContractServiceInitialized);
     console.log("[Home] 钱包连接状态:", walletService.isConnected());
@@ -220,6 +147,67 @@ const Home: React.FC = () => {
         }
       }
     }
+  }, [isContractServiceInitialized]);
+
+  // 检查钱包连接状态
+  const checkWalletConnection = React.useCallback(async () => {
+    console.log("[Home] 检查钱包连接状态");
+    try {
+      if (walletService.isConnected()) {
+        console.log("[Home] 钱包已连接，获取地址");
+        const address = await walletService.getCurrentAddress();
+        if (address) {
+          console.log("[Home] 获取到钱包地址:", address);
+          setCurrentUserAddress(address);
+          sessionStorage.setItem("currentUserAddr", address);
+          // 钱包连接成功后初始化合约服务
+        await initializeServices();
+        // 初始化完成后加载私有数据
+        console.log("[Home] 合约服务初始化完成，开始加载私有数据");
+        await loadPrivateData();
+        }
+      } else {
+        console.log("[Home] 钱包未连接");
+      }
+    } catch (error) {
+      console.error("[Home] 检查钱包连接失败:", error);
+    }
+  }, [loadPrivateData]);
+
+  React.useEffect(() => {
+    console.log("[Home] 组件初始化开始");
+    checkWalletConnection();
+    // 只加载不需要钱包连接的公共数据
+    loadPublicData();
+  }, [checkWalletConnection]);
+
+  // 移除我的誓约相关的useEffect，已迁移到MyOaths页面
+
+  // 初始化服务
+  const initializeServices = async () => {
+    console.log("[Home] 开始初始化合约服务");
+    try {
+      if (!walletService.isConnected()) {
+        console.log("[Home] 钱包未连接，跳过合约服务初始化");
+        return;
+      }
+      
+      console.log("[Home] 调用contractService.initialize()");
+      await contractService.initialize();
+      setIsContractServiceInitialized(true);
+      console.log("[Home] 合约服务初始化成功");
+    } catch (error) {
+      console.error("[Home] 合约服务初始化失败:", error);
+      setIsContractServiceInitialized(false);
+    }
+  };
+
+  // 加载公共数据（不需要钱包连接）
+  const loadPublicData = async () => {
+    console.log("[Home] 开始加载公共数据");
+    // 目前所有数据都需要合约服务，所以这里暂时不加载任何数据
+    // 等钱包连接后再加载
+    console.log("[Home] 公共数据加载完成（暂无公共数据）");
   };
 
   // 连接钱包
@@ -323,8 +311,27 @@ const Home: React.FC = () => {
       }
     }
 
+    // 初始化进度步骤
+    const steps: ProgressStep[] = [
+      { id: '1', label: '验证表单数据', description: '检查输入的誓约信息是否完整', status: 'pending' },
+      { id: '2', label: '初始化合约服务', description: '连接区块链网络和智能合约', status: 'pending' },
+      { id: '3', label: '处理代币转换', description: '如需要，将ETH转换为WETH', status: 'pending' },
+      { id: '4', label: '创建链上誓约', description: '在区块链上记录誓约信息', status: 'pending' },
+      { id: '5', label: '完成创建', description: '誓约创建成功，跳转到详情页', status: 'pending' }
+    ];
+    
+    setProgressSteps(steps);
+    setCurrentStepIndex(0);
+    setProgressOpen(true);
     setIsCreating(true);
+    
     try {
+      // 步骤1: 验证表单数据
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 0 ? { ...step, status: 'running' as const } : step
+      ));
+      setCurrentStepIndex(0);
+      
       console.log("[Home] 处理表单数据");
       const deadlineTimestamp = Math.floor(new Date(createForm.deadline).getTime() / 1000);
       const filteredCheckpoints = createForm.checkpoints.filter(cp => cp.trim() !== "");
@@ -338,17 +345,52 @@ const Home: React.FC = () => {
       console.log("  - 截止时间戳:", deadlineTimestamp);
       console.log("  - 检查点:", filteredCheckpoints);
       
+      await new Promise(resolve => setTimeout(resolve, 1000)); // 模拟处理时间
+      
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 0 ? { ...step, status: 'completed' } : step
+      ));
+      
+      // 步骤2: 初始化合约服务
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 1 ? { ...step, status: 'running' as const } : step
+      ));
+      setCurrentStepIndex(1);
+      
+      await new Promise(resolve => setTimeout(resolve, 500)); // 模拟处理时间
+      
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 1 ? { ...step, status: 'completed' } : step
+      ));
+      
+      // 步骤3: 处理代币转换
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 2 ? { ...step, status: 'running' as const } : step
+      ));
+      setCurrentStepIndex(2);
+      
       // 检查是否选择了WETH代币，如果是则显示转换提示
       const selectedToken = TOKEN_OPTIONS.find(token => token.address === createForm.tokenAddress);
       if (selectedToken?.symbol === 'WETH') {
         console.log("[Home] 检测到WETH代币，将自动处理ETH到WETH转换");
-        setWarningMessage("正在自动将ETH转换为WETH，请在钱包中确认交易...");
-        setOpenConnectWalletWarn(true);
+        setProgressSteps(prev => prev.map((step, index) => 
+          index === 2 ? { ...step, description: '正在将ETH转换为WETH，请在钱包中确认交易...' } : step
+        ));
         
-        // 延迟一下让用户看到提示
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        setOpenConnectWalletWarn(false);
+        await new Promise(resolve => setTimeout(resolve, 2000)); // 模拟转换时间
+      } else {
+        await new Promise(resolve => setTimeout(resolve, 500)); // 模拟处理时间
       }
+      
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 2 ? { ...step, status: 'completed' } : step
+      ));
+      
+      // 步骤4: 创建链上誓约
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 3 ? { ...step, status: 'running' as const } : step
+      ));
+      setCurrentStepIndex(3);
       
       console.log("[Home] 调用contractService.createOath");
       const oathId = await contractService.createOath(
@@ -361,6 +403,16 @@ const Home: React.FC = () => {
         filteredCheckpoints
       );
 
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 3 ? { ...step, status: 'completed' } : step
+      ));
+      
+      // 步骤5: 完成创建
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 4 ? { ...step, status: 'running' as const } : step
+      ));
+      setCurrentStepIndex(4);
+      
       console.log("[Home] 誓约创建成功，ID:", oathId);
       setOpenCreateDialog(false);
       setCreateForm({
@@ -373,8 +425,19 @@ const Home: React.FC = () => {
         checkpoints: [""]
       });
       
-      console.log("[Home] 跳转到誓约详情页:", `/oath/${oathId}`);
-      navigator(`/oath/${oathId}`);
+      await new Promise(resolve => setTimeout(resolve, 1000)); // 让用户看到完成状态
+      
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 4 ? { ...step, status: 'completed' } : step
+      ));
+      
+      // 延迟关闭进度对话框并跳转
+      setTimeout(() => {
+        setProgressOpen(false);
+        console.log("[Home] 跳转到誓约详情页:", `/oath/${oathId}`);
+        navigator(`/oath/${oathId}`);
+      }, 1500);
+      
     } catch (error) {
       console.error("[Home] 创建誓约失败:", error);
       console.error("[Home] 错误详情:", {
@@ -382,6 +445,12 @@ const Home: React.FC = () => {
         message: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined
       });
+      
+      // 标记当前步骤为失败
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === currentStepIndex ? { ...step, status: 'error', description: error instanceof Error ? error.message : "操作失败" } : step
+      ));
+      
       setWarningMessage(error instanceof Error ? error.message : "创建誓约失败");
       setOpenConnectWalletWarn(true);
     } finally {
@@ -405,8 +474,25 @@ const Home: React.FC = () => {
         result.items.map(id => contractService.getOath(id))
       );
       console.log('[Home] 获取到誓约详细数据:', oaths);
+      
+      // 获取每个誓约的评论数量
+      console.log('[Home] 开始获取评论数量');
+      const commentCounts: {[key: string]: number} = {};
+      await Promise.all(
+        oaths.map(async (oath) => {
+          try {
+            const comments = await contractService.getOathComments(oath.id);
+            commentCounts[oath.id.toString()] = comments.length;
+          } catch (error) {
+            console.error(`[Home] 获取誓约${oath.id}评论数量失败:`, error);
+            commentCounts[oath.id.toString()] = 0;
+          }
+        })
+      );
+      console.log('[Home] 评论数量获取完成:', commentCounts);
+      setOathCommentCounts(commentCounts);
+      
       setAllOaths(oaths);
-      // setOathsTotal(result.total);
       setOathsPage(page);
       console.log('[Home] 所有誓约加载成功，数量:', oaths.length);
     } catch (error) {
@@ -463,18 +549,76 @@ const Home: React.FC = () => {
       return;
     }
 
+    // 初始化进度步骤
+    const steps: ProgressStep[] = [
+      { id: '1', label: '验证用户权限', description: '检查钱包连接状态', status: 'pending' },
+      { id: '2', label: '提交点赞交易', description: '向区块链提交点赞请求', status: 'pending' },
+      { id: '3', label: '等待交易确认', description: '等待区块链确认交易', status: 'pending' },
+      { id: '4', label: '更新数据', description: '刷新页面数据', status: 'pending' },
+      { id: '5', label: '完成点赞', description: '点赞操作已完成', status: 'pending' }
+    ];
+
+    setProgressSteps(steps);
+    setCurrentStepIndex(0);
+    setProgressOpen(true);
+
     try {
+      // 步骤1: 验证用户权限
+      setProgressSteps(prev => prev.map((step, index) =>
+        index === 0 ? { ...step, status: 'running' as const } : step
+      ));
+      await new Promise(resolve => setTimeout(resolve, 500));
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 0 ? { ...step, status: 'completed' } : step
+      ));
+      setCurrentStepIndex(1);
+
+      // 步骤2: 提交点赞交易
+      setProgressSteps(prev => prev.map((step, index) =>
+        index === 1 ? { ...step, status: 'running' as const } : step
+      ));
       console.log('[Home] 调用contractService.likeOath()', oathId);
       await contractService.likeOath(oathId);
       console.log('[Home] 点赞成功');
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 1 ? { ...step, status: 'completed' } : step
+      ));
+      setCurrentStepIndex(2);
+
+      // 步骤3: 等待交易确认
+      setProgressSteps(prev => prev.map((step, index) =>
+        index === 2 ? { ...step, status: 'running' as const } : step
+      ));
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 2 ? { ...step, status: 'completed' } : step
+      ));
+      setCurrentStepIndex(3);
       
-      // 重新加载数据
+      // 步骤4: 更新数据
+      setProgressSteps(prev => prev.map((step, index) =>
+        index === 3 ? { ...step, status: 'running' as const } : step
+      ));
       console.log('[Home] 重新加载数据');
       await Promise.all([
         loadAllOaths(oathsPage),
         loadTopOaths()
       ]);
       console.log('[Home] 数据重新加载完成');
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 3 ? { ...step, status: 'completed' } : step
+      ));
+      setCurrentStepIndex(4);
+
+      // 步骤5: 完成点赞
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 4 ? { ...step, status: 'completed' } : step
+      ));
+      
+      // 2秒后自动关闭进度对话框
+      setTimeout(() => {
+        setProgressOpen(false);
+      }, 2000);
     } catch (error) {
       console.error('[Home] 点赞失败:', error);
       console.error('[Home] 错误详情:', {
@@ -482,6 +626,12 @@ const Home: React.FC = () => {
         message: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined
       });
+      
+      // 将当前步骤标记为失败
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === currentStepIndex ? { ...step, status: 'error', description: error instanceof Error ? error.message : '点赞失败' } : step
+      ));
+      
       setWarningMessage(error instanceof Error ? error.message : "点赞失败");
       setOpenConnectWalletWarn(true);
     }
@@ -825,7 +975,7 @@ const Home: React.FC = () => {
                             <Box sx={{ display: 'flex', alignItems: 'center' }}>
                               <CommentIcon sx={{ fontSize: 16, mr: 0.5 }} />
                               <Typography variant="caption">
-                                {0}
+                                {oathCommentCounts[allOaths[currentOathIndex]?.id?.toString()] || 0}
                               </Typography>
                             </Box>
                           </Box>
@@ -1087,6 +1237,15 @@ const Home: React.FC = () => {
             </Button>
           </DialogActions>
         </Dialog>
+
+        {/* Progress Dialog */}
+        <ProgressDialog
+          open={progressOpen}
+          onClose={() => setProgressOpen(false)}
+          steps={progressSteps}
+          currentStepIndex={currentStepIndex}
+          title="创建誓约"
+        />
 
       </Box>
     </Box>

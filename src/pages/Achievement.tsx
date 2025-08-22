@@ -34,6 +34,8 @@ import { contractService } from '../services/contractService';
 import { walletService } from '../services/walletService';
 import { AchievementType, ACHIEVEMENT_CONFIG } from '../types/nft';
 import type { AchievementInfo } from '../types/nft';
+import ProgressDialog from '../components/ProgressDialog';
+import type { ProgressStep } from '../components/ProgressDialog';
 
 interface AchievementDisplay {
   type: AchievementType;
@@ -61,6 +63,11 @@ const Achievement: React.FC = () => {
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success');
+  
+  // 进度对话框状态
+  const [progressOpen, setProgressOpen] = useState(false);
+  const [progressSteps, setProgressSteps] = useState<ProgressStep[]>([]);
+  const [currentStepIndex, setCurrentStepIndex] = useState(0);
 
   // 连接钱包
   const connectWallet = async () => {
@@ -93,12 +100,15 @@ const Achievement: React.FC = () => {
   };
 
   // 加载成就数据
-  const loadAchievements = async (userAddress: string) => {
+  const loadAchievements = React.useCallback(async (userAddress: string) => {
     try {
       setLoading(true);
       
       // 获取用户成就状态
       const achievementStatus = await contractService.checkMyAchievements(userAddress);
+      
+      // 获取用户统计数据
+      const userStats = await contractService.getUserStats(userAddress);
       
       // 转换为显示格式
       const achievementDisplays: AchievementDisplay[] = [];
@@ -108,13 +118,38 @@ const Achievement: React.FC = () => {
         const config = ACHIEVEMENT_CONFIG[achievementType];
         
         if (config) {
+          // 根据成就类型计算实际进度
+          let currentProgress = 0;
+          switch (achievementType) {
+            case AchievementType.FIRST_OATH: // 首次誓约 - 创建誓约数量
+              currentProgress = userStats.totalOaths;
+              break;
+            case AchievementType.OATH_KEEPER: // 守约达人 - 完成誓约数量
+              currentProgress = userStats.completedOaths;
+              break;
+            case AchievementType.TRUSTED_CREATOR: // 信任创建者 - 获得点赞数
+              currentProgress = userStats.totalUpvotes;
+              break;
+            case AchievementType.COMMUNITY_STAR: // 社区之星 - 获得点赞数
+              currentProgress = userStats.totalUpvotes;
+              break;
+            case AchievementType.MILESTONE_MASTER: // 里程碑大师 - 创建誓约数量
+              currentProgress = userStats.totalOaths;
+              break;
+            case AchievementType.EARLY_ADOPTER: // 早期采用者 - 创建誓约数量
+              currentProgress = userStats.totalOaths;
+              break;
+            default:
+              currentProgress = 0;
+          }
+          
           achievementDisplays.push({
             type: achievementType,
             info: config,
             hasAchievement: status.hasAchievement,
             // 简化判断逻辑，如果没有成就就可以铸造
             canMint: !status.hasAchievement,
-            progress: 0,
+            progress: currentProgress,
             config: config
           });
         }
@@ -127,7 +162,7 @@ const Achievement: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   // 铸造成就NFT
   const handleMintAchievement = async (achievement: AchievementDisplay) => {
@@ -136,8 +171,55 @@ const Achievement: React.FC = () => {
       return;
     }
 
+    // 初始化进度步骤
+    const steps: ProgressStep[] = [
+      { id: '1', label: '验证成就资格', status: 'pending', description: '检查用户是否符合铸造条件' },
+      { id: '2', label: '准备铸造数据', status: 'pending', description: '生成NFT元数据和图片' },
+      { id: '3', label: '提交铸造交易', status: 'pending', description: '向区块链提交铸造请求' },
+      { id: '4', label: '等待交易确认', status: 'pending', description: '等待区块链网络确认交易' },
+      { id: '5', label: '完成铸造', status: 'pending', description: '更新本地数据并显示结果' }
+    ];
+
+    setProgressSteps(steps);
+    setCurrentStepIndex(0);
+    setProgressOpen(true);
+    setMintingAchievement(achievement.type);
+
     try {
-      setMintingAchievement(achievement.type);
+      // 步骤1: 验证成就资格
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 0 ? { ...step, status: 'running' as const } : step
+      ));
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 0 ? { ...step, status: 'completed' } : step
+      ));
+      setCurrentStepIndex(1);
+
+      // 步骤2: 准备铸造数据
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 1 ? { ...step, status: 'running' as const } : step
+      ));
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 1 ? { ...step, status: 'completed' } : step
+      ));
+      setCurrentStepIndex(2);
+
+      // 步骤3: 提交铸造交易
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 2 ? { ...step, status: 'running' as const } : step
+      ));
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 2 ? { ...step, status: 'completed' } : step
+      ));
+      setCurrentStepIndex(3);
+
+      // 步骤4: 等待交易确认
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 3 ? { ...step, status: 'running' as const } : step
+      ));
       
       // 调用合约铸造成就
       await contractService.mintAchievement(
@@ -146,14 +228,45 @@ const Achievement: React.FC = () => {
         achievement.info.imageUrl
       );
       
-      showSnackbar('成就NFT铸造成功！', 'success');
+      setProgressSteps(prev => prev.map((step, index) =>
+        index === 3 ? { ...step, status: 'running' as const } : step
+      ));
+      setCurrentStepIndex(4);
+
+      // 步骤5: 完成铸造
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 4 ? { ...step, status: 'running' as const } : step
+      ));
       
       // 重新加载成就数据
       await loadAchievements(currentUserAddress);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 4 ? { ...step, status: 'completed' } : step
+      ));
+      
+      showSnackbar('成就NFT铸造成功！', 'success');
+      
+      // 延迟关闭进度对话框
+      setTimeout(() => {
+        setProgressOpen(false);
+      }, 2000);
       
     } catch (error) {
       console.error('铸造成就失败:', error);
+      
+      // 将当前步骤标记为失败
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === currentStepIndex ? { ...step, status: 'error', description: `${step.description} - 失败: ${error instanceof Error ? error.message : '未知错误'}` } : step
+      ));
+      
       showSnackbar('铸造成就失败', 'error');
+      
+      // 延迟关闭进度对话框
+      setTimeout(() => {
+        setProgressOpen(false);
+      }, 3000);
     } finally {
       setMintingAchievement(null);
       setOpenMintDialog(false);
@@ -206,14 +319,14 @@ const Achievement: React.FC = () => {
     };
     
     init();
-  }, []);
+  }, [loadAchievements]);
 
   // 当用户地址变化时重新加载数据
   useEffect(() => {
     if (currentUserAddress) {
       loadAchievements(currentUserAddress);
     }
-  }, [currentUserAddress]);
+  }, [currentUserAddress, loadAchievements]);
 
   return (
     <Box sx={{ bgcolor: 'background.default', minHeight: '100vh' }}>
@@ -384,12 +497,12 @@ const Achievement: React.FC = () => {
                               进度
                             </Typography>
                             <Typography variant="caption" color="text.secondary">
-                              0 / {achievement.info.threshold}
+                              {achievement.progress} / {achievement.info.threshold}
                             </Typography>
                           </Box>
                           <LinearProgress
                             variant="determinate"
-                            value={0}
+                            value={Math.min((achievement.progress / achievement.info.threshold) * 100, 100)}
                             sx={{ height: 6, borderRadius: 3 }}
                           />
                         </Box>
@@ -493,6 +606,14 @@ const Achievement: React.FC = () => {
           {snackbarMessage}
         </Alert>
       </Snackbar>
+
+      {/* 进度对话框 */}
+      <ProgressDialog
+        open={progressOpen}
+        steps={progressSteps}
+        currentStepIndex={currentStepIndex}
+        title="铸造成就NFT"
+      />
     </Box>
   );
 };
