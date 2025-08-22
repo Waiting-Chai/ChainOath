@@ -1,5 +1,6 @@
 import { ethers, formatEther, parseEther, BrowserProvider } from 'ethers';
-import { getCurrentNetworkConfig, CURRENT_NETWORK } from '../contracts/config';
+import { getCurrentNetworkConfig, CURRENT_NETWORK, TOKEN_OPTIONS } from '../contracts/config';
+import {  WETHABI } from '../contracts/ChainOathABI';
 
 // ==================== Interface Definitions ====================
 
@@ -135,7 +136,7 @@ export class ContractService {
     'function addComment(uint256 oathId, string content) external',
     'function handleExpiredOath(uint256 oathId) external',
     'function withdrawFunds(uint256 oathId) external',
-    'function getOath(uint256 oathId) external view returns (tuple(string title, string description, address creater, address committer, address tokenAddress, uint256 amount, uint256 deadline, string[] checkpoints, uint8 completionStatus, uint256 upvotes, bool isActive, uint256 createdAt, string evaluationFeedback))',
+    'function getOath(uint256 oathId) external view returns (tuple(uint256 id, string title, string description, address creater, address committer, address tokenAddress, uint256 amount, uint256 createTime, uint256 deadline, string[] checkpoints, uint8 completionStatus, uint256 upvotes, bool isActive))',
     'function getUserCreatedOaths(address user) external view returns (uint256[])',
     'function getUserCommittedOaths(address user) external view returns (uint256[])',
     'function getAllOaths(uint256 offset, uint256 limit) external view returns (tuple(uint256 id, string title, string description, address creater, address committer, uint256 amount, uint256 deadline, uint256 createdAt, uint8 status, uint256 upvotes)[], uint256)',
@@ -316,6 +317,14 @@ export class ContractService {
     
     try {
       console.log('[ContractService] 处理代币授权');
+      
+      // 检查是否为WETH代币，如果是则处理ETH到WETH的转换
+      const wethAddress = TOKEN_OPTIONS.find(token => token.symbol === 'WETH')?.address;
+      if (tokenAddress.toLowerCase() === wethAddress?.toLowerCase()) {
+        console.log('[ContractService] 检测到WETH代币，开始处理ETH到WETH转换');
+        await this.handleETHToWETHConversion(tokenAddress, amount);
+      }
+      
       // 首先需要授权代币
       const tokenAbi = [
         'function approve(address spender, uint256 amount) external returns (bool)',
@@ -453,12 +462,29 @@ export class ContractService {
       console.log('[ContractService] 创建誓约交易确认成功');
       console.log('[ContractService] 交易收据:', receipt);
       
-      const event = receipt.events?.find((e: any) => e.event === 'OathCreated');
-      console.log('[ContractService] 查找OathCreated事件:', event);
+      // 解析事件日志
+      let oathId: number | null = null;
       
-      if (event) {
-        const oathId = Number(event.args.oathId);
-        console.log('[ContractService] 获取到誓约ID:', oathId);
+      // 尝试从交易收据的logs中解析OathCreated事件
+      for (const log of receipt.logs) {
+        try {
+          const parsedLog = this.oathContract!.interface.parseLog({
+            topics: log.topics,
+            data: log.data
+          });
+          
+          if (parsedLog && parsedLog.name === 'OathCreated') {
+            oathId = Number(parsedLog.args.oathId);
+            console.log('[ContractService] 从事件日志获取到誓约ID:', oathId);
+            break;
+          }
+        } catch (parseError) {
+          // 忽略解析错误，继续尝试下一个日志
+          continue;
+        }
+      }
+      
+      if (oathId !== null) {
         return oathId;
       }
       
@@ -478,7 +504,9 @@ export class ContractService {
       if (error instanceof Error) {
         const errorMessage = error.message.toLowerCase();
         
-        if (errorMessage.includes('execution reverted')) {
+        if (errorMessage.includes('eth余额不足')) {
+          userFriendlyMessage = error.message; // 直接使用ETH转换的详细错误信息
+        } else if (errorMessage.includes('execution reverted')) {
           console.error('[ContractService] 合约执行被回滚');
           if (errorMessage.includes('missing revert data')) {
             userFriendlyMessage = '合约调用失败：可能是参数验证失败或合约状态不正确。请检查：\n1. 网络连接是否正常\n2. 合约地址是否正确\n3. 参数是否有效\n4. 账户余额是否充足';
@@ -600,7 +628,7 @@ export class ContractService {
       const result = await this.oathContract!.getOath(oathId);
       
       return {
-        id: oathId,
+        id: Number(result.id),
         title: result.title,
         description: result.description,
         creater: result.creater,
@@ -614,8 +642,8 @@ export class ContractService {
         upvotes: Number(result.upvotes),
         likeCount: Number(result.upvotes), // 添加likeCount属性
         isActive: result.isActive,
-        createdAt: Number(result.createdAt),
-        evaluationFeedback: result.evaluationFeedback
+        createdAt: Number(result.createTime),
+        evaluationFeedback: '' // 合约中暂无此字段，设为空字符串
       };
     } catch (error) {
       console.error('Failed to get oath:', error);
@@ -917,6 +945,76 @@ export class ContractService {
       throw new Error('Failed to get token ID from transaction');
     } catch (error) {
       console.error('Failed to mint achievement:', error);
+      throw error;
+    }
+  }
+
+  // ==================== ETH to WETH Conversion ====================
+
+  /**
+   * 处理ETH到WETH的转换
+   */
+  private async handleETHToWETHConversion(wethAddress: string, requiredAmount: string): Promise<void> {
+    console.log('[ContractService] 开始处理ETH到WETH转换');
+    
+    try {
+      if (!this.signer) {
+        throw new Error('Signer未初始化');
+      }
+      
+      const signerAddress = await this.signer.getAddress();
+      console.log('[ContractService] 用户地址:', signerAddress);
+      
+      // 创建WETH合约实例
+      const wethContract = new ethers.Contract(wethAddress, WETHABI, this.signer);
+      
+      // 获取WETH精度
+      const decimals = await wethContract.decimals();
+      const requiredAmountBN = ethers.parseUnits(requiredAmount, decimals);
+      console.log('[ContractService] 需要的WETH数量:', requiredAmountBN.toString());
+      
+      // 检查当前WETH余额
+      const wethBalance = await wethContract.balanceOf(signerAddress);
+      console.log('[ContractService] 当前WETH余额:', wethBalance.toString());
+      
+      // 如果WETH余额不足，则将ETH转换为WETH
+      if (wethBalance < requiredAmountBN) {
+        const shortfall = requiredAmountBN - wethBalance;
+        console.log('[ContractService] WETH余额不足，需要转换ETH数量:', shortfall.toString());
+        
+        // 检查ETH余额
+        const ethBalance = await this.provider!.getBalance(signerAddress);
+        console.log('[ContractService] 当前ETH余额:', ethBalance.toString());
+        
+        // 预留一些ETH用于gas费用
+        const gasReserve = ethers.parseEther('0.01'); // 预留0.01 ETH
+        const availableETH = ethBalance - gasReserve;
+        
+        if (availableETH < shortfall) {
+          const requiredETH = ethers.formatEther(shortfall);
+          const currentETH = ethers.formatEther(availableETH);
+          throw new Error(`ETH余额不足！需要 ${requiredETH} ETH 来转换为WETH，但当前可用余额只有 ${currentETH} ETH（已预留gas费用）`);
+        }
+        
+        console.log('[ContractService] 开始将ETH转换为WETH');
+        const depositTx = await wethContract.deposit({ value: shortfall });
+        console.log('[ContractService] ETH转WETH交易哈希:', depositTx.hash);
+        
+        await depositTx.wait();
+        console.log('[ContractService] ETH转WETH交易确认成功');
+        
+        // 验证转换后的余额
+        const newWethBalance = await wethContract.balanceOf(signerAddress);
+        console.log('[ContractService] 转换后WETH余额:', newWethBalance.toString());
+        
+        if (newWethBalance < requiredAmountBN) {
+          throw new Error('WETH转换后余额仍然不足');
+        }
+      } else {
+        console.log('[ContractService] WETH余额充足，无需转换');
+      }
+    } catch (error) {
+      console.error('[ContractService] ETH到WETH转换失败:', error);
       throw error;
     }
   }

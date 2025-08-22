@@ -338,6 +338,18 @@ const Home: React.FC = () => {
       console.log("  - 截止时间戳:", deadlineTimestamp);
       console.log("  - 检查点:", filteredCheckpoints);
       
+      // 检查是否选择了WETH代币，如果是则显示转换提示
+      const selectedToken = TOKEN_OPTIONS.find(token => token.address === createForm.tokenAddress);
+      if (selectedToken?.symbol === 'WETH') {
+        console.log("[Home] 检测到WETH代币，将自动处理ETH到WETH转换");
+        setWarningMessage("正在自动将ETH转换为WETH，请在钱包中确认交易...");
+        setOpenConnectWalletWarn(true);
+        
+        // 延迟一下让用户看到提示
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        setOpenConnectWalletWarn(false);
+      }
+      
       console.log("[Home] 调用contractService.createOath");
       const oathId = await contractService.createOath(
         createForm.title,
