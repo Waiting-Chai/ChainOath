@@ -154,8 +154,7 @@ export class ContractService {
   private nftContractABI = [
     'function getUserTokens(address user) external view returns (uint256[])',
     'function hasAchievement(address user, uint8 achievementType) external view returns (bool)',
-    'function getAchievement(uint256 tokenId) external view returns (tuple(uint8 achievementType, string name, string description, string imageURI, uint256 mintedAt, string rarity))',
-    'function getAchievementInfo(uint8 achievementType) external view returns (tuple(string name, string description, string imagePrompt, string rarity))',
+    'function getAchievement(uint256 tokenId) external view returns (tuple(uint8 achievementType, string name, string description, string imageURI, uint256 mintTime, bool isActive))',
     'function mintAchievement(uint8 achievementType, uint256 oathId, string metadataURI) external payable',
     'function balanceOf(address owner) external view returns (uint256)',
     'function tokenURI(uint256 tokenId) external view returns (string)',
@@ -865,6 +864,7 @@ export class ContractService {
     
     try {
       const result = await this.nftContract!.getAchievement(tokenId);
+      const achievementInfo = await this.getAchievementInfo(result.achievementType);
       
       return {
         tokenId,
@@ -872,8 +872,8 @@ export class ContractService {
         name: result.name,
         description: result.description,
         imageURI: result.imageURI,
-        mintedAt: Number(result.mintedAt),
-        rarity: result.rarity
+        mintedAt: Number(result.mintTime),
+        rarity: achievementInfo.rarity
       };
     } catch (error) {
       console.error('Failed to get achievement:', error);
@@ -882,24 +882,49 @@ export class ContractService {
   }
 
   /**
-   * 获取成就类型信息
+   * 获取成就信息（本地映射）
    */
   async getAchievementInfo(achievementType: AchievementType): Promise<AchievementInfo> {
-    this.ensureInitialized();
+    const achievementInfoMap: { [key in AchievementType]: AchievementInfo } = {
+      [AchievementType.FIRST_OATH]: {
+        name: "首次誓约",
+        description: "创建第一个誓约",
+        imagePrompt: "A golden badge with a handshake symbol",
+        rarity: "Common"
+      },
+      [AchievementType.OATH_KEEPER]: {
+        name: "守约达人",
+        description: "完成1个誓约",
+        imagePrompt: "A silver shield with a checkmark",
+        rarity: "Uncommon"
+      },
+      [AchievementType.TRUSTED_CREATER]: {
+        name: "信任创建者",
+        description: "创建的誓约获得2个点赞",
+        imagePrompt: "A bronze crown with stars",
+        rarity: "Rare"
+      },
+      [AchievementType.COMMUNITY_STAR]: {
+        name: "社区之星",
+        description: "获得总计3个点赞",
+        imagePrompt: "A platinum star with radiating light",
+        rarity: "Epic"
+      },
+      [AchievementType.MILESTONE_MASTER]: {
+        name: "里程碑大师",
+        description: "创建2个誓约",
+        imagePrompt: "A diamond trophy with multiple gems",
+        rarity: "Legendary"
+      },
+      [AchievementType.EARLY_ADOPTER]: {
+        name: "早期采用者",
+        description: "在合约部署后24小时内创建誓约",
+        imagePrompt: "A special badge with clock and rocket",
+        rarity: "Mythic"
+      }
+    };
     
-    try {
-      const result = await this.nftContract!.getAchievementInfo(achievementType);
-      
-      return {
-        name: result.name,
-        description: result.description,
-        imagePrompt: result.imagePrompt,
-        rarity: result.rarity
-      };
-    } catch (error) {
-      console.error('Failed to get achievement info:', error);
-      throw error;
-    }
+    return achievementInfoMap[achievementType];
   }
 
   /**
