@@ -44,9 +44,16 @@ const ProgressDialog: React.FC<ProgressDialogProps> = ({
   title,
   steps,
   currentStepIndex,
-  progress = 0,
+  progress: _progress = 0, // eslint-disable-line @typescript-eslint/no-unused-vars
   canClose = false
 }) => {
+  // 基于检查点计算真实进度
+  const completedSteps = steps.filter(step => step.status === 'completed').length;
+  const totalSteps = steps.length;
+  const checkpointProgress = totalSteps > 0 ? (completedSteps / totalSteps) * 100 : 0;
+  
+  // 使用检查点进度
+  const displayProgress = checkpointProgress;
   const getStepIcon = (step: ProgressStep) => {
     switch (step.status) {
       case 'completed':
@@ -126,18 +133,19 @@ const ProgressDialog: React.FC<ProgressDialogProps> = ({
               总体进度
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ ml: 'auto' }}>
-              {Math.round(progress)}%
+              {Math.round(displayProgress)}% ({completedSteps}/{totalSteps})
             </Typography>
           </Box>
           <LinearProgress
             variant="determinate"
-            value={progress}
+            value={displayProgress}
             sx={{
               height: 8,
               borderRadius: 4,
               bgcolor: 'grey.200',
               '& .MuiLinearProgress-bar': {
-                borderRadius: 4
+                borderRadius: 4,
+                transition: 'transform 0.3s ease-in-out'
               }
             }}
           />

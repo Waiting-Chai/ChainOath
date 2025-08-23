@@ -222,11 +222,7 @@ const Achievement: React.FC = () => {
       ));
       
       // 调用合约铸造成就
-      await contractService.mintAchievement(
-        0, // oathId - 使用0作为默认值
-        achievement.type,
-        achievement.info.imageUrl
-      );
+      await contractService.mintAchievement();
       
       setProgressSteps(prev => prev.map((step, index) =>
         index === 3 ? { ...step, status: 'running' as const } : step

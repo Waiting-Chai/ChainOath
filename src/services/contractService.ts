@@ -1,4 +1,4 @@
-import { ethers, formatEther, parseEther, BrowserProvider } from 'ethers';
+import { ethers, formatEther, BrowserProvider } from 'ethers';
 import { getCurrentNetworkConfig, CURRENT_NETWORK, TOKEN_OPTIONS } from '../contracts/config';
 import { WETHABI } from '../contracts/ChainOathABI';
 
@@ -157,7 +157,7 @@ export class ContractService {
     'function getUserTokens(address user) external view returns (uint256[])',
     'function hasAchievement(address user, uint8 achievementType) external view returns (bool)',
     'function getAchievement(uint256 tokenId) external view returns (tuple(uint8 achievementType, string name, string description, string imageURI, uint256 mintTime, bool isActive))',
-    'function mintAchievement(uint8 achievementType, uint256 oathId, string metadataURI) external payable',
+    'function checkMyAchievements() external',
     'function balanceOf(address owner) external view returns (uint256)',
     'function tokenURI(uint256 tokenId) external view returns (string)',
     'event AchievementMinted(address indexed user, uint8 indexed achievementType, uint256 indexed tokenId)'
@@ -941,29 +941,23 @@ export class ContractService {
   /**
    * 铸造成就NFT
    */
-  async mintAchievement(
-    achievementType: AchievementType,
-    oathId: number,
-    metadataURI: string
-  ): Promise<number> {
+  async mintAchievement(): Promise<number> {
     this.ensureInitialized();
     
     try {
-      const tx = await this.nftContract!.mintAchievement(
-        achievementType,
-        oathId,
-        metadataURI,
-        { value: parseEther('0.01') } // 假设铸造费用为0.01 ETH
-      );
+      // 调用checkMyAchievements来自动检查并铸造成就
+      const tx = await this.nftContract!.checkMyAchievements();
       
       const receipt = await tx.wait();
-      const event = receipt.events?.find((e: any) => e.event === 'AchievementMinted');
+      const events = receipt.events?.filter((e: any) => e.event === 'AchievementMinted');
       
-      if (event) {
-        return Number(event.args.tokenId);
+      if (events && events.length > 0) {
+        // 返回最新铸造的成就tokenId
+        const latestEvent = events[events.length - 1];
+        return Number(latestEvent.args.tokenId);
       }
       
-      throw new Error('Failed to get token ID from transaction');
+      throw new Error('No achievement was minted. You may not meet the requirements yet.');
     } catch (error) {
       console.error('Failed to mint achievement:', error);
       throw error;
