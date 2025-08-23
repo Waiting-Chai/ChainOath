@@ -45,6 +45,7 @@ import {
   ArrowBack as ArrowBackIcon,
   ArrowForward as ArrowForwardIcon,
   Close as CloseIcon,
+  Search as SearchIcon,
 } from "@mui/icons-material";
 import { walletService } from "../services/walletService";
 import { contractService, CompletionStatus } from "../services/contractService";
@@ -761,23 +762,14 @@ const Home: React.FC = () => {
               justifyContent: "center",
             }}
           >
-            <Button color="inherit" sx={{ mx: 1 }} component={RouterLink} to="/">
-              首页
-            </Button>
-            <Button color="inherit" sx={{ mx: 1 }}>
-              探索
+            <Button color="inherit" sx={{ mx: 1 }} component={RouterLink} to="/search" startIcon={<SearchIcon />}>
+              搜索用户
             </Button>
             <Button color="inherit" sx={{ mx: 1 }} component={RouterLink} to="/achievements">
               成就中心
             </Button>
             <Button color="inherit" sx={{ mx: 1 }} component={RouterLink} to="/notifications">
               通知中心
-            </Button>
-            <Button color="inherit" sx={{ mx: 1 }}>
-              文档
-            </Button>
-            <Button color="inherit" sx={{ mx: 1 }}>
-              关于
             </Button>
           </Box>
 

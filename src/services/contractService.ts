@@ -65,6 +65,7 @@ export interface Achievement {
   imageURI: string;
   mintedAt: number;
   rarity: string;
+  hasAchievement?: boolean; // 可选属性，用于标识用户是否拥有该成就
 }
 
 // 用户统计接口
@@ -1090,10 +1091,44 @@ export class ContractService {
         Promise.all(committedIds.map(id => this.getOath(id)))
       ]);
       
-      // 获取点赞的和评论的誓约需要遍历所有誓约（这里简化处理）
-      // 在实际应用中，可能需要在合约中添加相应的查询方法
+      // 获取点赞的和评论的誓约
       const likedOaths: Oath[] = [];
       const commentedOaths: Oath[] = [];
+      
+      try {
+        // 获取所有誓约来检查点赞和评论
+        const allOathsResult = await this.getAllOaths(1, 1000); // 获取大量誓约
+        const allOathIds = allOathsResult.items;
+        
+        // 检查每个誓约是否被用户点赞或评论
+        for (const oathId of allOathIds) {
+          try {
+            // 检查是否点赞
+            const hasLiked = await this.hasUserLiked(oathId, userAddress);
+            if (hasLiked) {
+              const oath = await this.getOath(oathId);
+              likedOaths.push(oath);
+            }
+            
+            // 检查是否评论
+            const comments = await this.getOathComments(oathId);
+            const hasCommented = comments.some(comment => comment.author.toLowerCase() === userAddress.toLowerCase());
+            if (hasCommented) {
+              const oath = await this.getOath(oathId);
+              // 避免重复添加（如果用户既点赞又评论了同一个誓约）
+              if (!commentedOaths.find(o => o.id === oath.id)) {
+                commentedOaths.push(oath);
+              }
+            }
+          } catch (error) {
+            console.warn(`Failed to check oath ${oathId}:`, error);
+            // 继续处理其他誓约
+          }
+        }
+      } catch (error) {
+        console.error('Failed to get liked/commented oaths:', error);
+        // 如果获取失败，返回空数组
+      }
       
       return {
         created: createdOaths,

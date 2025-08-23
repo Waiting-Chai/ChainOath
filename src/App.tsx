@@ -7,6 +7,7 @@ import Error from './pages/Error';
 import Achievement from './pages/Achievement';
 import OathDetail from './pages/OathDetail';
 import MyOaths from './pages/MyOaths';
+import UserSearch from './pages/UserSearch';
 
 function App() {
   return (
@@ -19,6 +20,7 @@ function App() {
           <Route path="/achievements" element={<Achievement />} />
           <Route path="/oath/:id" element={<OathDetail />} />
           <Route path="/my-oaths" element={<MyOaths />} />
+          <Route path="/search" element={<UserSearch />} />
         </Routes>
       </Router>
     </ThemeProvider>

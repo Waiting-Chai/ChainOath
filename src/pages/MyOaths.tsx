@@ -361,7 +361,7 @@ const MyOaths: React.FC = () => {
                             />
                             <Box sx={{ display: 'flex', alignItems: 'center', ml: 2 }}>
                               <CommentIcon sx={{ fontSize: 16, mr: 0.5 }} />
-                              <Typography variant="caption">{0}</Typography>
+                              <Typography variant="caption">已评论</Typography>
                             </Box>
                           </Box>
                         </CardContent>
