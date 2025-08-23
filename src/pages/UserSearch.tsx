@@ -677,8 +677,6 @@ const UserSearch: React.FC = () => {
                   <Grid container spacing={3}>
                     {Object.entries(ACHIEVEMENT_CONFIG).map(([type, config]) => {
                       const achievementType = parseInt(type) as AchievementType;
-                      const userAchievement = userAchievements.find(a => a.achievementType === achievementType);
-                      const isOwned = !!userAchievement;
                       
                       // 根据成就类型计算实际进度
                       let progress = 0;
@@ -706,6 +704,10 @@ const UserSearch: React.FC = () => {
                             progress = 0;
                         }
                       }
+                      
+                      // 基于实际进度判断是否获得成就
+                      const isOwned = progress >= config.threshold;
+                      
                       return (
                         <Grid size={{ xs: 12, sm: 6, md: 4 }} key={achievementType}>
                           <Card 
@@ -738,9 +740,12 @@ const UserSearch: React.FC = () => {
                                 color={isOwned ? 'success' : 'default'}
                                 size="small"
                               />
-                              <Typography variant="caption" display="block" sx={{ mt: 1 }}>
-                                进度: {progress}/{config.threshold}
-                              </Typography>
+                              {/* 只有未完成的成就才显示进度 */}
+                              {!isOwned && (
+                                <Typography variant="caption" display="block" sx={{ mt: 1 }}>
+                                  进度: {progress}/{config.threshold}
+                                </Typography>
+                              )}
                               {isOwned && (
                                 <Typography variant="caption" display="block" sx={{ mt: 1, color: 'success.main' }}>
                                   ✓ 已解锁
