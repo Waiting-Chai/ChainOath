@@ -1034,6 +1034,134 @@ export class ContractService {
     }
   }
 
+  /**
+   * 创建人领取质押（将WETH转换为ETH并提取）
+   */
+  async withdrawStakeAsCreator(oathId: number): Promise<string> {
+    this.ensureInitialized();
+    
+    try {
+      console.log('[ContractService] 创建人开始领取质押, oathId:', oathId);
+      
+      // 获取誓约信息
+      const oath = await this.getOath(oathId);
+      const currentUser = await this.getCurrentUserAddress();
+      
+      // 验证用户是创建人
+      if (oath.creater.toLowerCase() !== currentUser.toLowerCase()) {
+        throw new Error('只有创建人可以领取质押');
+      }
+      
+      // 验证誓约状态（未评估状态才能领取）
+      if (oath.completionStatus !== CompletionStatus.PENDING) {
+        throw new Error('只有未评估的誓约才能领取质押');
+      }
+      
+      // 获取WETH代币信息
+      const wethToken = TOKEN_OPTIONS.find(token => 
+        token.address.toLowerCase() === oath.tokenAddress.toLowerCase()
+      );
+      
+      if (!wethToken || wethToken.symbol !== 'WETH') {
+        throw new Error('此誓约不是WETH代币，无法使用此功能');
+      }
+      
+      // 创建WETH合约实例
+      const wethContract = new ethers.Contract(oath.tokenAddress, WETHABI, this.signer!);
+      
+      // 获取合约中的WETH余额（应该等于质押金额）
+      const contractBalance = await wethContract.balanceOf(this.contractAddresses.chainOathSecure);
+      console.log('[ContractService] 合约WETH余额:', contractBalance.toString());
+      
+      // 调用合约的withdrawFunds函数
+      console.log('[ContractService] 调用withdrawFunds函数');
+      const tx = await this.oathContract!.withdrawFunds(oathId);
+      console.log('[ContractService] 提取交易哈希:', tx.hash);
+      
+      await tx.wait();
+      console.log('[ContractService] 提取交易确认成功');
+      
+      // 获取用户当前WETH余额
+      const userWethBalance = await wethContract.balanceOf(currentUser);
+      console.log('[ContractService] 用户WETH余额:', userWethBalance.toString());
+      
+      // 将WETH转换为ETH
+      if (userWethBalance > 0) {
+        console.log('[ContractService] 开始将WETH转换为ETH');
+        const withdrawTx = await wethContract.withdraw(userWethBalance);
+        console.log('[ContractService] WETH转ETH交易哈希:', withdrawTx.hash);
+        
+        await withdrawTx.wait();
+        console.log('[ContractService] WETH转ETH交易确认成功');
+      }
+      
+      return tx.hash;
+    } catch (error) {
+      console.error('[ContractService] 创建人领取质押失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 守约人领取奖励（将WETH转换为ETH并提取）
+   */
+  async claimRewardAsCommitter(oathId: number): Promise<string> {
+    this.ensureInitialized();
+    
+    try {
+      console.log('[ContractService] 守约人开始领取奖励, oathId:', oathId);
+      
+      // 获取誓约信息
+      const oath = await this.getOath(oathId);
+      const currentUser = await this.getCurrentUserAddress();
+      
+      // 验证用户是守约人
+      if (oath.committer.toLowerCase() !== currentUser.toLowerCase()) {
+        throw new Error('只有守约人可以领取奖励');
+      }
+      
+      // 验证誓约状态（必须是已完成状态）
+      if (oath.completionStatus !== CompletionStatus.COMPLETED) {
+        throw new Error('只有已完成的誓约才能领取奖励');
+      }
+      
+      // 获取WETH代币信息
+      const wethToken = TOKEN_OPTIONS.find(token => 
+        token.address.toLowerCase() === oath.tokenAddress.toLowerCase()
+      );
+      
+      if (!wethToken || wethToken.symbol !== 'WETH') {
+        throw new Error('此誓约不是WETH代币，无法使用此功能');
+      }
+      
+      // 创建WETH合约实例
+      const wethContract = new ethers.Contract(oath.tokenAddress, WETHABI, this.signer!);
+      
+      // 检查用户当前WETH余额
+      const userWethBalance = await wethContract.balanceOf(currentUser);
+      console.log('[ContractService] 用户当前WETH余额:', userWethBalance.toString());
+      
+      // 如果用户已经有WETH余额，说明奖励已经发放到用户账户
+      if (userWethBalance > 0) {
+        console.log('[ContractService] 检测到用户已有WETH余额，开始转换为ETH');
+        
+        // 将WETH转换为ETH
+        const withdrawTx = await wethContract.withdraw(userWethBalance);
+        console.log('[ContractService] WETH转ETH交易哈希:', withdrawTx.hash);
+        
+        await withdrawTx.wait();
+        console.log('[ContractService] WETH转ETH交易确认成功');
+        
+        return withdrawTx.hash;
+      } else {
+        throw new Error('未检测到WETH奖励余额，请确认誓约状态');
+      }
+    } catch (error) {
+      console.error('[ContractService] 守约人领取奖励失败:', error);
+      throw error;
+    }
+  }
+
   // ==================== Utility Methods ====================
 
   /**

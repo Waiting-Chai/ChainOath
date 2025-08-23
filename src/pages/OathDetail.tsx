@@ -36,12 +36,15 @@ import {
   CheckCircle as CheckCircleIcon,
   Cancel as CancelIcon,
   Close as CloseIcon,
+  AccountBalanceWallet as WalletIcon,
 } from '@mui/icons-material';
 import { contractService } from '../services/contractService';
 import type { Oath, Comment } from '../services/contractService';
 import { CompletionStatus } from '../services/contractService';
 import ProgressDialog from '../components/ProgressDialog';
 import type { ProgressStep } from '../components/ProgressDialog';
+import WETHBalanceChecker from '../components/WETHBalanceChecker';
+import { TOKEN_OPTIONS } from '../contracts/config';
 
 const OathDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -62,6 +65,13 @@ const OathDetail: React.FC = () => {
   const [progressOpen, setProgressOpen] = useState(false);
   const [progressSteps, setProgressSteps] = useState<ProgressStep[]>([]);
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
+  
+  // WETH余额检查器状态
+  const [wethCheckerOpen, setWethCheckerOpen] = useState(false);
+  
+  // 领取功能状态
+  const [isWithdrawing, setIsWithdrawing] = useState(false);
+  const [isClaiming, setIsClaiming] = useState(false);
 
   const loadOathDetail = useCallback(async () => {
     if (!id) return;
@@ -181,6 +191,160 @@ const OathDetail: React.FC = () => {
       ));
     } finally {
       setIsLiking(false);
+    }
+  };
+
+  // 创建人领取质押
+  const handleWithdrawStake = async () => {
+    if (!oath || !currentUserAddress || isWithdrawing) return;
+    
+    try {
+      setIsWithdrawing(true);
+      setProgressOpen(true);
+      setProgressSteps([
+        { id: '1', label: '验证用户权限', description: '检查用户权限', status: 'pending' },
+        { id: '2', label: '调用合约提取质押', description: '提取质押资金', status: 'pending' },
+        { id: '3', label: '将WETH转换为ETH', description: '转换代币', status: 'pending' },
+        { id: '4', label: '完成提取', description: '提取完成', status: 'pending' }
+      ]);
+      setCurrentStepIndex(0);
+      
+      // 步骤1: 验证权限
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 0 ? { ...step, status: 'running' as const } : step
+      ));
+      
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 0 ? { ...step, status: 'completed' } : step
+      ));
+      setCurrentStepIndex(1);
+      
+      // 步骤2: 调用合约提取
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 1 ? { ...step, status: 'running' as const } : step
+      ));
+      
+      await contractService.withdrawStakeAsCreator(oath.id);
+      
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 1 ? { ...step, status: 'completed' } : step
+      ));
+      setCurrentStepIndex(2);
+      
+      // 步骤3: WETH转ETH (已在合约服务中处理)
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 2 ? { ...step, status: 'running' as const } : step
+      ));
+      
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 2 ? { ...step, status: 'completed' } : step
+      ));
+      setCurrentStepIndex(3);
+      
+      // 步骤4: 完成
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 3 ? { ...step, status: 'completed' } : step
+      ));
+      
+      // 重新加载誓约详情
+      await loadOathDetail();
+      
+      setTimeout(() => {
+        setProgressOpen(false);
+      }, 2000);
+      
+    } catch (error) {
+      console.error('Failed to withdraw stake:', error);
+      setError(`领取质押失败: ${error instanceof Error ? error.message : '未知错误'}`);
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === currentStepIndex ? { ...step, status: 'error', description: error instanceof Error ? error.message : '领取质押失败' } : step
+      ));
+      setTimeout(() => {
+        setProgressOpen(false);
+      }, 3000);
+    } finally {
+      setIsWithdrawing(false);
+    }
+  };
+
+  // 守约人领取奖励
+  const handleClaimReward = async () => {
+    if (!oath || !currentUserAddress || isClaiming) return;
+    
+    try {
+      setIsClaiming(true);
+      setProgressOpen(true);
+      setProgressSteps([
+        { id: '1', label: '验证用户权限', description: '检查用户权限', status: 'pending' },
+        { id: '2', label: '检查WETH奖励余额', description: '检查奖励余额', status: 'pending' },
+        { id: '3', label: '将WETH转换为ETH', description: '转换代币', status: 'pending' },
+        { id: '4', label: '完成领取', description: '领取完成', status: 'pending' }
+      ]);
+      setCurrentStepIndex(0);
+      
+      // 步骤1: 验证权限
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 0 ? { ...step, status: 'running' as const } : step
+      ));
+      
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 0 ? { ...step, status: 'completed' } : step
+      ));
+      setCurrentStepIndex(1);
+      
+      // 步骤2: 检查余额并领取
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 1 ? { ...step, status: 'running' as const } : step
+      ));
+      
+      await contractService.claimRewardAsCommitter(oath.id);
+      
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 1 ? { ...step, status: 'completed' } : step
+      ));
+      setCurrentStepIndex(2);
+      
+      // 步骤3: WETH转ETH (已在合约服务中处理)
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 2 ? { ...step, status: 'running' as const } : step
+      ));
+      
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 2 ? { ...step, status: 'completed' } : step
+      ));
+      setCurrentStepIndex(3);
+      
+      // 步骤4: 完成
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === 3 ? { ...step, status: 'completed' } : step
+      ));
+      
+      // 重新加载誓约详情
+      await loadOathDetail();
+      
+      setTimeout(() => {
+        setProgressOpen(false);
+      }, 2000);
+      
+    } catch (error) {
+      console.error('Failed to claim reward:', error);
+      setError(`领取奖励失败: ${error instanceof Error ? error.message : '未知错误'}`);
+      setProgressSteps(prev => prev.map((step, index) => 
+        index === currentStepIndex ? { ...step, status: 'error', description: error instanceof Error ? error.message : '领取奖励失败' } : step
+      ));
+      setTimeout(() => {
+        setProgressOpen(false);
+      }, 3000);
+    } finally {
+      setIsClaiming(false);
     }
   };
 
@@ -329,7 +493,16 @@ const OathDetail: React.FC = () => {
 
   
   const isCreator = currentUserAddress && oath && currentUserAddress.toLowerCase() === oath.creater.toLowerCase();
+  const isCommitter = currentUserAddress && oath && currentUserAddress.toLowerCase() === oath.committer.toLowerCase();
   const canEvaluate = isCreator && oath?.completionStatus === CompletionStatus.PENDING;
+  
+  // 创建人在未评估之前可以领取质押（PENDING状态），如果誓约已结束则不显示按钮
+  const canWithdrawStake = isCreator && oath?.completionStatus === CompletionStatus.PENDING && 
+    oath && TOKEN_OPTIONS.find(token => token.address.toLowerCase() === oath.tokenAddress.toLowerCase())?.symbol === 'WETH';
+  
+  // 守约人在创建人评估完成且结果为认可状态时才显示领取奖励按钮
+  const canClaimReward = isCommitter && oath?.completionStatus === CompletionStatus.COMPLETED && 
+    oath && TOKEN_OPTIONS.find(token => token.address.toLowerCase() === oath.tokenAddress.toLowerCase())?.symbol === 'WETH';
   
 
 
@@ -478,6 +651,39 @@ const OathDetail: React.FC = () => {
                     评估任务
                   </Button>
                 )}
+                {canWithdrawStake && (
+                  <Button
+                    variant="contained"
+                    color="success"
+                    startIcon={<WalletIcon />}
+                    onClick={handleWithdrawStake}
+                    disabled={isWithdrawing}
+                  >
+                    {isWithdrawing ? '领取中...' : '领取质押'}
+                  </Button>
+                )}
+                {canClaimReward && (
+                  <Button
+                    variant="contained"
+                    color="success"
+                    startIcon={<WalletIcon />}
+                    onClick={handleClaimReward}
+                    disabled={isClaiming}
+                  >
+                    {isClaiming ? '领取中...' : '领取奖励'}
+                  </Button>
+                )}
+                {/* WETH余额检查按钮 */}
+                {oath && TOKEN_OPTIONS.find(token => token.address.toLowerCase() === oath.tokenAddress.toLowerCase())?.symbol === 'WETH' && (
+                  <Button
+                    variant="outlined"
+                    color="info"
+                    startIcon={<WalletIcon />}
+                    onClick={() => setWethCheckerOpen(true)}
+                  >
+                    检查WETH余额
+                  </Button>
+                )}
               </Box>
             )}
 
@@ -614,6 +820,14 @@ const OathDetail: React.FC = () => {
         steps={progressSteps}
         currentStepIndex={currentStepIndex}
         title="操作进度"
+      />
+
+      {/* WETH余额检查器 */}
+      <WETHBalanceChecker
+        open={wethCheckerOpen}
+        onClose={() => setWethCheckerOpen(false)}
+        userAddress={currentUserAddress}
+        oathId={parseInt(id || '0', 10)}
       />
 
     </Container>
