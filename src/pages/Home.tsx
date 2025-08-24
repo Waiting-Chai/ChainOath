@@ -29,6 +29,7 @@ import {
   MenuItem,
   FormControl,
   InputLabel,
+  Badge,
 } from "@mui/material";
 import {
   Add as AddIcon,
@@ -46,6 +47,7 @@ import {
   ArrowForward as ArrowForwardIcon,
   Close as CloseIcon,
   Search as SearchIcon,
+  Notifications as NotificationsIcon,
 } from "@mui/icons-material";
 import { walletService } from "../services/walletService";
 import { contractService, CompletionStatus } from "../services/contractService";
@@ -101,6 +103,9 @@ const Home: React.FC = () => {
   const [topOaths, setTopOaths] = React.useState<Oath[]>([]);
   const [topOathsLoading, setTopOathsLoading] = React.useState(false);
 
+  // 通知数量状态
+  const [unreadNotificationCount, setUnreadNotificationCount] = React.useState(0);
+
   const handleConnectWalletSnackbarClose = (
     _event?: React.SyntheticEvent | Event,
     reason?: string
@@ -128,6 +133,7 @@ const Home: React.FC = () => {
       await Promise.all([
         loadAllOaths(),
         loadTopOaths(),
+        loadUnreadNotificationCount(),
       ]);
       console.log("[Home] 私有数据加载完成");
     } catch (error) {
@@ -141,6 +147,7 @@ const Home: React.FC = () => {
           await Promise.all([
             loadAllOaths(),
             loadTopOaths(),
+            loadUnreadNotificationCount(),
           ]);
           console.log("[Home] 重新初始化后私有数据加载完成");
         } catch (retryError) {
@@ -538,6 +545,35 @@ const Home: React.FC = () => {
     }
   };
 
+  // 加载未读通知数量
+  const loadUnreadNotificationCount = async () => {
+    console.log('[Home] 开始加载未读通知数量');
+    
+    try {
+      if (!currentUserAddress) {
+        console.log('[Home] 用户地址为空，跳过通知数量加载');
+        return;
+      }
+      
+      console.log('[Home] 调用contractService.getUserCommittedOaths');
+      const committedOathIds = await contractService.getUserCommittedOaths(currentUserAddress);
+      console.log('[Home] 获取到被指派的誓约ID列表:', committedOathIds);
+      
+      // 获取每个誓约的详细信息
+      const oathPromises = committedOathIds.map(id => contractService.getOath(id));
+      const oaths = await Promise.all(oathPromises);
+      
+      // 计算未完成的任务数量（即未读通知数量）
+      const unreadCount = oaths.filter(oath => oath.completionStatus === CompletionStatus.PENDING).length;
+      console.log('[Home] 未读通知数量:', unreadCount);
+      
+      setUnreadNotificationCount(unreadCount);
+    } catch (error) {
+      console.error('[Home] 加载未读通知数量失败:', error);
+      // 不抛出错误，避免影响其他数据加载
+    }
+  };
+
   // 点赞誓约
   const handleLikeOath = async (oathId: number) => {
     console.log('[Home] 开始点赞誓约, oathId:', oathId);
@@ -768,9 +804,11 @@ const Home: React.FC = () => {
             <Button color="inherit" sx={{ mx: 1 }} component={RouterLink} to="/achievements">
               成就中心
             </Button>
-            <Button color="inherit" sx={{ mx: 1 }} component={RouterLink} to="/notifications">
-              通知中心
-            </Button>
+            <Badge badgeContent={unreadNotificationCount} color="error" sx={{ mx: 1 }}>
+              <Button color="inherit" component={RouterLink} to="/notifications" startIcon={<NotificationsIcon />}>
+                通知中心
+              </Button>
+            </Badge>
           </Box>
 
           <IconButton

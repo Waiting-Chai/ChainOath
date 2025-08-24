@@ -8,6 +8,7 @@ import Achievement from './pages/Achievement';
 import OathDetail from './pages/OathDetail';
 import MyOaths from './pages/MyOaths';
 import UserSearch from './pages/UserSearch';
+import Notifications from './pages/Notifications';
 
 function App() {
   return (
@@ -16,11 +17,12 @@ function App() {
       <Router>
         <Routes>
           <Route path="/" element={<Home />} />
-          <Route path="/error" element={<Error/>} />
+          <Route path="/error" element={<Error />} />
           <Route path="/achievements" element={<Achievement />} />
           <Route path="/oath/:id" element={<OathDetail />} />
           <Route path="/my-oaths" element={<MyOaths />} />
           <Route path="/search" element={<UserSearch />} />
+          <Route path="/notifications" element={<Notifications />} />
         </Routes>
       </Router>
     </ThemeProvider>
